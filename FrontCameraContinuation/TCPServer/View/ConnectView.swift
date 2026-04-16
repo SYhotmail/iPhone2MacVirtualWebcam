@@ -10,7 +10,7 @@ import Combine
 
 struct ConnectView: View {
     let manager = ServerManager()
-    //let videoView = VideoView()
+    let videoView = VideoView()
     
     @State var isRunning = false
     @State var listenerStatus: String = ""
@@ -27,7 +27,6 @@ struct ConnectView: View {
                     isRunning = true
                 }
             }
-            let videoView = VideoView()
             VideoViewRepresentable(videoView: videoView)
                 .onAppear {
                     manager.decoder.displayLayer = videoView.displayLayer
