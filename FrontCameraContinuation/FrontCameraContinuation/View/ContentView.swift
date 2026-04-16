@@ -10,14 +10,31 @@ import SwiftUI
 struct ContentView: View {
     let manager = StreamManager()
     @State var isStreaming = false
+    @State private var host = "192.168.1.10"
+    @State private var port = "9999"
+
     var body: some View {
-        VStack {
+        VStack(spacing: 16) {
             Spacer()
+            TextField("Mac IP address", text: $host)
+                .textContentType(.URL)
+                .keyboardType(.numbersAndPunctuation)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            TextField("Port", text: $port)
+                .keyboardType(.numberPad)
+
             Button(isStreaming ? "Stop Streaming" : "Start Streaming") {
                 if isStreaming {
                     manager.stopStreaming()
+                    isStreaming = false
                 } else {
-                    manager.startStreaming()
+                    manager.startStreaming(
+                        host: host.trimmingCharacters(in: .whitespacesAndNewlines),
+                        port: UInt16(port) ?? 9999
+                    )
+                    isStreaming = true
                 }
             }
             Spacer()

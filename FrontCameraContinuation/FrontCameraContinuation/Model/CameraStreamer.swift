@@ -9,6 +9,7 @@
 import AVFoundation
 import VideoToolbox
 import Network
+import UIKit
 
 struct StreamManager {
     private let cameraStreamer = CameraStreamer()
@@ -32,20 +33,26 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let session = AVCaptureSession()
     private var compressionSession: VTCompressionSession?
     private var connection: NWConnection?
+    private var videoOutput: AVCaptureVideoDataOutput?
+    private let captureQueue = DispatchQueue(label: "camera")
     private var sentConfig = false
     private var frameIndex: Int = 0
+    private var encodedWidth: Int32 = 0
+    private var encodedHeight: Int32 = 0
 
     func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position) {
         let res = setupConnection(host: host, port: port)
         assert(res)
-        setupEncoder(width: 1280, height: 720)
         try? setupCamera(position: position)
     }
     
     func stopStreaming() {
+        NotificationCenter.default.removeObserver(self)
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
         DispatchQueue.global(qos: .default).async { [weak session] in
             session?.stopRunning()
         }
+        invalidateEncoder()
         connection?.cancel()
     }
 
@@ -105,20 +112,57 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
         
         let output = AVCaptureVideoDataOutput()
-        output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera"))
+        output.setSampleBufferDelegate(self, queue: captureQueue)
 
         if session.canAddOutput(output) {
             session.addOutput(output)
         }
+        videoOutput = output
+        configureVideoConnection()
         session.commitConfiguration()
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(deviceOrientationDidChange),
+            name: UIDevice.orientationDidChangeNotification,
+            object: nil
+        )
         DispatchQueue.global(qos: .default).async { [weak session] in
             session?.startRunning()
         }
     }
 
+    private func configureVideoConnection() {
+        guard let videoConnection = videoOutput?.connection(with: .video) else { return }
+
+        if videoConnection.isVideoMirroringSupported {
+            videoConnection.isVideoMirrored = true
+        }
+
+        applyDeviceOrientation(to: videoConnection)
+    }
+
+    @objc private func deviceOrientationDidChange() {
+        captureQueue.async { [weak self] in
+            guard let self,
+                  let videoConnection = self.videoOutput?.connection(with: .video) else { return }
+
+            self.applyDeviceOrientation(to: videoConnection)
+        }
+    }
+
+    private func applyDeviceOrientation(to videoConnection: AVCaptureConnection) {
+        guard videoConnection.isVideoOrientationSupported,
+              let videoOrientation = AVCaptureVideoOrientation(deviceOrientation: UIDevice.current.orientation) else { return }
+
+        videoConnection.videoOrientation = videoOrientation
+    }
+
     // MARK: - Encoder
 
     private func setupEncoder(width: Int32, height: Int32) {
+        invalidateEncoder()
+
         VTCompressionSessionCreate(
             allocator: nil,
             width: width,
@@ -149,6 +193,20 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                              value: kVTProfileLevel_H264_Baseline_AutoLevel)
 
         VTCompressionSessionPrepareToEncodeFrames(compressionSession!)
+        encodedWidth = width
+        encodedHeight = height
+        sentConfig = false
+        frameIndex = 0
+    }
+
+    private func invalidateEncoder() {
+        guard let compressionSession else { return }
+
+        VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
+        VTCompressionSessionInvalidate(compressionSession)
+        self.compressionSession = nil
+        encodedWidth = 0
+        encodedHeight = 0
     }
 
     private let compressionCallback: VTCompressionOutputCallback = {
@@ -281,7 +339,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                        from connection: AVCaptureConnection) {
 
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let session = compressionSession else { return }
+              let session = compressionSession(for: pixelBuffer) else { return }
 
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
 
@@ -301,5 +359,33 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
+    }
+
+    private func compressionSession(for pixelBuffer: CVPixelBuffer) -> VTCompressionSession? {
+        let width = Int32(CVPixelBufferGetWidth(pixelBuffer))
+        let height = Int32(CVPixelBufferGetHeight(pixelBuffer))
+
+        if compressionSession == nil || width != encodedWidth || height != encodedHeight {
+            setupEncoder(width: width, height: height)
+        }
+
+        return compressionSession
+    }
+}
+
+private extension AVCaptureVideoOrientation {
+    init?(deviceOrientation: UIDeviceOrientation) {
+        switch deviceOrientation {
+        case .portrait:
+            self = .portrait
+        case .portraitUpsideDown:
+            self = .portraitUpsideDown
+        case .landscapeLeft:
+            self = .landscapeRight
+        case .landscapeRight:
+            self = .landscapeLeft
+        default:
+            return nil
+        }
     }
 }

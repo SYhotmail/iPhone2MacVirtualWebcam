@@ -29,12 +29,21 @@ final class H264Decoder {
         
         switch nalType {
         case 7: // SPS
-            sps = data.advanced(by: 4)
+            let newSPS = data.advanced(by: 4)
+            if sps != newSPS {
+                resetDecoder()
+                pps = nil
+            }
+            sps = newSPS
             print("📡 SPS received:", sps!.count)
             createFormatDescriptionIfPossible()
 
         case 8: // PPS
-            pps = data.advanced(by: 4)
+            let newPPS = data.advanced(by: 4)
+            if pps != newPPS {
+                resetDecoder()
+            }
+            pps = newPPS
             print("📡 PPS received:", pps!.count)
             createFormatDescriptionIfPossible()
 
@@ -46,6 +55,14 @@ final class H264Decoder {
 
             decodeFrame(data)
         }
+    }
+
+    private func resetDecoder() {
+        if let session {
+            VTDecompressionSessionInvalidate(session)
+        }
+        session = nil
+        formatDescription = nil
     }
 
     private func createFormatDescriptionIfPossible() {
