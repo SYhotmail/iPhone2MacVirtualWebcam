@@ -11,26 +11,81 @@ import VideoToolbox
 import Network
 import UIKit
 
+enum StreamSize: String, CaseIterable, Identifiable {
+    case full
+    case hd720
+    case hd1920x1080
+    case vga
+    case medium
+    case low
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .full:
+            return "Default(High Quality Output)"
+        case .hd1920x1080:
+            return "1920 x 1080"
+        case .hd720:
+            return "1280 x 720"
+        case .vga:
+            return "640 x 480"
+        case .medium:
+            return "Medium"
+        case .low:
+            return "Low"
+        }
+    }
+
+    var sessionPreset: AVCaptureSession.Preset {
+        switch self {
+        case .full:
+            return .high
+        case .hd1920x1080:
+            return .hd1920x1080
+        case .hd720:
+            return .hd1280x720
+        case .vga:
+            return .vga640x480
+        case .medium:
+            return .medium
+        case .low:
+            return .low
+        }
+    }
+}
+
 struct StreamManager {
     private let cameraStreamer = CameraStreamer()
     
     func startStreaming(host: String = "192.168.1.10",
-                        port: UInt16 = 9999) {
+                        port: UInt16 = 9999,
+                        streamSize: StreamSize = .full) {
         cameraStreamer.startStreaming(
             host: host,
             port: port,
-            position: .front
+            position: .front,
+            streamSize: streamSize
         )
     }
     
     func stopStreaming() {
         cameraStreamer.stopStreaming()
     }
+    
+    private func canSetPresent(size: StreamSize) -> Bool {
+        cameraStreamer.session.canSetSessionPreset(size.sessionPreset)
+    }
+    
+    func supportedCameraSessionPresets() -> [StreamSize] {
+        StreamSize.allCases.filter {canSetPresent(size: $0)}
+    }
 }
 
 final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
-    private let session = AVCaptureSession()
+    let session = AVCaptureSession()
     private var compressionSession: VTCompressionSession?
     private var connection: NWConnection?
     private var videoOutput: AVCaptureVideoDataOutput?
@@ -43,16 +98,18 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var currentHost: String?
     private var currentPort: UInt16?
     private var currentPosition: AVCaptureDevice.Position = .front
+    private var currentStreamSize: StreamSize = .full
 
-    func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position) {
+    func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, streamSize: StreamSize) {
         currentHost = host
         currentPort = port
         currentPosition = position
+        currentStreamSize = streamSize
         shouldAutoResume = true
 
         let res = setupConnection(host: host, port: port)
         assert(res)
-        try? setupCamera(position: position)
+        try? setupCamera(position: position, streamSize: streamSize)
     }
     
     func stopStreaming() {
@@ -107,8 +164,9 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     // MARK: - Camera
 
-    private func setupCamera(position: AVCaptureDevice.Position) throws {
+    private func setupCamera(position: AVCaptureDevice.Position, streamSize: StreamSize) throws {
         guard session.inputs.isEmpty else {
+            applySessionPreset(streamSize.sessionPreset)
             configureVideoConnection()
             beginOrientationUpdates()
             beginSessionInterruptionUpdates()
@@ -120,6 +178,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             return
         }
         session.beginConfiguration()
+        applySessionPreset(streamSize.sessionPreset)
 
         let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)!
         let input = try AVCaptureDeviceInput(device: device)
@@ -142,6 +201,11 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         DispatchQueue.global(qos: .default).async { [weak session] in
             session?.startRunning()
         }
+    }
+
+    private func applySessionPreset(_ preset: AVCaptureSession.Preset) {
+        guard session.canSetSessionPreset(preset) else { return }
+        session.sessionPreset = preset
     }
 
     private func beginOrientationUpdates() {
@@ -234,6 +298,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         invalidateEncoder()
         setupConnection(host: host, port: port)
+        applySessionPreset(currentStreamSize.sessionPreset)
         configureVideoConnection()
         beginOrientationUpdates()
         beginSessionInterruptionUpdates()

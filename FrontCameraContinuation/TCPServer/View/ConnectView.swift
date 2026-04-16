@@ -17,7 +17,7 @@ struct ConnectView: View {
     @State var connectionStatus: String = ""
     
     var body: some View {
-        VStack {
+        VStack(spacing: 12) {
             Button(isRunning ? "Stop" : "Start") {
                 if isRunning {
                     manager.stop()
@@ -31,7 +31,6 @@ struct ConnectView: View {
                 .onAppear {
                     manager.decoder.displayLayer = videoView.displayLayer
                 }
-            Spacer()
             HStack {
                 Text("Listener: \(listenerStatus)")
                 Spacer()
@@ -48,6 +47,7 @@ struct ConnectView: View {
             self.connectionStatus = value
         })
         .padding()
+        .frame(minWidth: 900, minHeight: 560)
     }
 }
 
