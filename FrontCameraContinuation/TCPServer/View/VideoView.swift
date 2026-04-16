@@ -1,3 +1,11 @@
+//
+//  VideoView.swift
+//  FrontCameraContinuation
+//
+//  Created by Siarhei Yakushevich on 16/04/2026.
+//
+
+
 import AppKit
 import AVFoundation
 

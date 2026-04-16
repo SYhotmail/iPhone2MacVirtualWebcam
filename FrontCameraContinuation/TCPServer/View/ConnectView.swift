@@ -8,8 +8,22 @@
 import SwiftUI
 import Combine
 
+/*
+ let videoView = VideoView()
+     let decoder = H264Decoder()
+
+     var body: some View {
+         VideoViewRepresentable(videoView: videoView)
+             .onAppear {
+                 decoder.displayLayer = videoView.displayLayer
+             }
+     }
+ */
+
 struct ConnectView: View {
     let manager = ServerManager()
+    let videoView = VideoView()
+    
     @State var isRunning = false
     @State var listenerStatus: String = ""
     @State var connectionStatus: String = ""
@@ -23,6 +37,11 @@ struct ConnectView: View {
                     manager.start()
                 }
             }
+            
+            VideoViewRepresentable(videoView: videoView)
+                .onAppear {
+                    manager.decoder.displayLayer = videoView.displayLayer
+                }
             Spacer()
             HStack {
                 Text("Listener: \(listenerStatus)")

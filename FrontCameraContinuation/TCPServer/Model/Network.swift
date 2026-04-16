@@ -9,10 +9,13 @@
 import Network
 import Foundation
 import Combine
+import VideoToolbox
+import CoreMedia
+import CoreVideo
 
 final class ServerManager {
     private let server = TCPServer()
-    private let decoder = H264Decoder()
+    let decoder = H264Decoder()
     
     var listenerStatusPublisher: AnyPublisher<String, Never> {
         server.listenerState.map(\.debugDescription).receive(on: RunLoop.main).eraseToAnyPublisher()
@@ -254,4 +257,3 @@ private final class TCPServer {
         }
     }
 }
-

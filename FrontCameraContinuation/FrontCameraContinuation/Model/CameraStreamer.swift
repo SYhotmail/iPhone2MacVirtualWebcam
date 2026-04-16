@@ -32,6 +32,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private let session = AVCaptureSession()
     private var compressionSession: VTCompressionSession?
     private var connection: NWConnection?
+    private var sentConfig = false
+    private var frameIndex: Int = 0
 
     func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position) {
         let res = setupConnection(host: host, port: port)
@@ -134,6 +136,18 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
                              key: kVTCompressionPropertyKey_RealTime,
                              value: kCFBooleanTrue)
 
+        VTSessionSetProperty(compressionSession!,
+                             key: kVTCompressionPropertyKey_AllowFrameReordering,
+                             value: kCFBooleanFalse)
+
+        VTSessionSetProperty(compressionSession!,
+                             key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
+                             value: 30 as CFTypeRef)
+
+        VTSessionSetProperty(compressionSession!,
+                             key: kVTCompressionPropertyKey_ProfileLevel,
+                             value: kVTProfileLevel_H264_Baseline_AutoLevel)
+
         VTCompressionSessionPrepareToEncodeFrames(compressionSession!)
     }
 
@@ -146,22 +160,118 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         let streamer = Unmanaged<CameraStreamer>.fromOpaque(refCon!).takeUnretainedValue()
 
-        guard let dataBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+        // Detect keyframe
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true)! as NSArray
+        let dict = attachments[0] as! NSDictionary
+        let isKeyframe = !(dict[kCMSampleAttachmentKey_NotSync] as? Bool ?? false)
+        
+        if isKeyframe || !streamer.sentConfig {
+            print("📡 isKeyframe:", isKeyframe)
+            
+            streamer.sendParameterSets(from: sampleBuffer)
+            streamer.sentConfig = true
+        }
+
+        // Extract and send NAL units in Annex-B format
+        let nalUnits = streamer.extractNALUnits(from: sampleBuffer)
+        for nal in nalUnits {
+            var packet = Data([0,0,0,1]) // start code
+            packet.append(nal)
+            streamer.send(packet)
+        }
+    }
+
+    // MARK: - H264 helpers
+
+    private func sendParameterSets(from sampleBuffer: CMSampleBuffer) {
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
+
+        var spsPointer: UnsafePointer<UInt8>?
+        var spsSize: Int = 0
+        var spsCount: Int = 0
+
+        var ppsPointer: UnsafePointer<UInt8>?
+        var ppsSize: Int = 0
+        var ppsCount: Int = 0
+
+        // Extract SPS
+        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 0,
+            parameterSetPointerOut: &spsPointer,
+            parameterSetSizeOut: &spsSize,
+            parameterSetCountOut: &spsCount,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        // Extract PPS
+        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+            formatDesc,
+            parameterSetIndex: 1,
+            parameterSetPointerOut: &ppsPointer,
+            parameterSetSizeOut: &ppsSize,
+            parameterSetCountOut: &ppsCount,
+            nalUnitHeaderLengthOut: nil
+        )
+
+        guard let spsPointer, let ppsPointer else {
+            print("❌ Failed to extract SPS/PPS")
+            return
+        }
+
+        let sps = Data(bytes: spsPointer, count: spsSize)
+        let pps = Data(bytes: ppsPointer, count: ppsSize)
+
+        print("📡 Sending SPS:", sps.count)
+        print("📡 Sending PPS:", pps.count)
+
+        let startCode = Data([0, 0, 0, 1])
+
+        // ✅ Send SPS separately
+        var spsPacket = Data()
+        spsPacket.append(startCode)
+        spsPacket.append(sps)
+        send(spsPacket)
+
+        // ✅ Send PPS separately
+        var ppsPacket = Data()
+        ppsPacket.append(startCode)
+        ppsPacket.append(pps)
+        send(ppsPacket)
+    }
+
+    private func extractNALUnits(from sampleBuffer: CMSampleBuffer) -> [Data] {
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return [] }
 
         var length = 0
         var totalLength = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
 
         CMBlockBufferGetDataPointer(
-            dataBuffer,
+            blockBuffer,
             atOffset: 0,
             lengthAtOffsetOut: &length,
             totalLengthOut: &totalLength,
             dataPointerOut: &dataPointer
         )
 
-        let data = Data(bytes: dataPointer!, count: totalLength)
-        streamer.send(data)
+        var offset = 0
+        var nalUnits: [Data] = []
+
+        while offset < totalLength {
+            var nalLength32: UInt32 = 0
+            memcpy(&nalLength32, dataPointer!.advanced(by: offset), 4)
+            let nalLength = Int(CFSwapInt32BigToHost(nalLength32))
+
+            let nalStart = offset + 4
+            let nalData = Data(bytes: dataPointer!.advanced(by: nalStart), count: nalLength)
+
+            nalUnits.append(nalData)
+
+            offset += 4 + nalLength
+        }
+
+        return nalUnits
     }
 
     // MARK: - Capture delegate
@@ -175,12 +285,19 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
 
+        frameIndex += 1
+        let shouldForceKeyframe = frameIndex % 30 == 0
+
+        let frameProperties: CFDictionary? = shouldForceKeyframe
+        ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
+        : nil
+
         VTCompressionSessionEncodeFrame(
             session,
             imageBuffer: pixelBuffer,
             presentationTimeStamp: pts,
             duration: .invalid,
-            frameProperties: nil,
+            frameProperties: frameProperties,
             sourceFrameRefcon: nil,
             infoFlagsOut: nil
         )
