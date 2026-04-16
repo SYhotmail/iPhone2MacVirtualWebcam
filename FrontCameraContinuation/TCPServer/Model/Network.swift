@@ -33,12 +33,18 @@ final class ServerManager {
         server.onFrame = { [weak self] data in
             self?.decoder.decode(data)
         }
+
+        server.onStreamUnavailable = { [weak self] in
+            self?.decoder.resetForStreamRestart()
+        }
         
         try? server.start(port: port)
     }
     
     func stop() {
         server.onFrame = nil
+        server.onStreamUnavailable = nil
+        decoder.resetForStreamRestart()
         server.stop()
     }
 }
@@ -129,10 +135,13 @@ extension NWListener.State: NetworkConnectionStateProvable, @retroactive CustomD
 private final class TCPServer {
 
     var onFrame: ((Data) -> Void)?
+    var onStreamUnavailable: (() -> Void)?
     
     private var listener: NWListener!
     
     private var connections = [NWConnection]()
+    private var inactivityTimers = [ObjectIdentifier: DispatchWorkItem]()
+    private let inactivityTimeout: TimeInterval = 1.5
     let connectionStates = [CurrentValueSubject<NWConnection.State, Never>].init(repeating: .init(.setup), count: 1)
     let listenerState = CurrentValueSubject<NWListener.State, Never>(.setup)
     
@@ -154,6 +163,7 @@ private final class TCPServer {
                 
                 switch state {
                     case .ready:
+                        self.scheduleInactivityTimeout(for: connection)
                         self.receive(connection)
 
                     case .waiting(let error):
@@ -174,6 +184,7 @@ private final class TCPServer {
             
             guard let self else { return }
             self.lock.withLock {
+                self.cancelConnections(force: true)
                 self.connections.append(connection)
             }
             connection.start(queue: .global())
@@ -190,12 +201,14 @@ private final class TCPServer {
     }
     
     private func remove(_ connection: NWConnection) {
+        cancelInactivityTimeout(for: connection)
         connection.stateUpdateHandler = nil
         connections.removeAll { $0 === connection }
     }
     
     func cancelConnections(force: Bool = false) {
         connections.forEach {
+            cancelInactivityTimeout(for: $0)
             $0.stateUpdateHandler = nil
             if force {
                 $0.forceCancel()
@@ -205,6 +218,7 @@ private final class TCPServer {
         }
         connections.removeAll()
         connectionStates.last!.value = .cancelled
+        onStreamUnavailable?()
         //connectionStates.removeAll()
     }
     
@@ -254,12 +268,38 @@ private final class TCPServer {
                 self.readFrame(connection, expectedSize: expectedSize, buffer: newBuffer)
             } else {
                 // ✅ full frame received
+                self.scheduleInactivityTimeout(for: connection)
                 self.onFrame?(newBuffer)
 
                 // read next frame
                 self.readSize(connection)
             }
         }
+    }
+
+    private func scheduleInactivityTimeout(for connection: NWConnection) {
+        let identifier = ObjectIdentifier(connection)
+        let workItem = DispatchWorkItem { [weak self, weak connection] in
+            guard let self, let connection else { return }
+            self.lock.withLock {
+                guard self.connections.contains(where: { $0 === connection }) else { return }
+            }
+
+            print("⏱️ No video frames received; closing stale connection")
+            self.close(connection, cancel: true)
+        }
+
+        lock.withLock {
+            inactivityTimers[identifier]?.cancel()
+            inactivityTimers[identifier] = workItem
+        }
+        DispatchQueue.global().asyncAfter(deadline: .now() + inactivityTimeout, execute: workItem)
+    }
+
+    private func cancelInactivityTimeout(for connection: NWConnection) {
+        let identifier = ObjectIdentifier(connection)
+        inactivityTimers[identifier]?.cancel()
+        inactivityTimers.removeValue(forKey: identifier)
     }
 
     private func close(_ connection: NWConnection, cancel: Bool) {
@@ -270,5 +310,6 @@ private final class TCPServer {
             remove(connection)
             connectionStates.last!.value = .cancelled
         }
+        onStreamUnavailable?()
     }
 }

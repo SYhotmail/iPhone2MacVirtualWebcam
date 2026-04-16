@@ -65,6 +65,12 @@ final class H264Decoder {
         formatDescription = nil
     }
 
+    func resetForStreamRestart() {
+        resetDecoder()
+        sps = nil
+        pps = nil
+    }
+
     private func createFormatDescriptionIfPossible() {
         guard let sps, let pps else { return }
         if session != nil { return }
