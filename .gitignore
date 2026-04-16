@@ -1,0 +1,40 @@
+// Xcode
+*.xcuserstate
+*.xcscmblueprint
+*.xccheckout
+*.moved-aside
+*.xcworkspace/xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+DerivedData/
+build/
+Build/
+
+// SwiftPM
+.swiftpm/
+.packages/
+Package.pins
+Package.resolved
+
+// CocoaPods
+Pods/
+*.lock
+
+// Carthage
+Carthage/Build/
+
+// Fastlane
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/**/*.png
+fastlane/test_output
+
+// Archives
+*.ipa
+*.dSYM
+*.dSYM.zip
+
+// User-specific
+*.DS_Store
+FrontCameraContinuation/FrontCameraContinuation.xcodeproj/xcuserdata/
+FrontCameraContinuation/FrontCameraContinuation.xcodeproj/project.xcworkspace/
