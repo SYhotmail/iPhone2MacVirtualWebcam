@@ -156,13 +156,17 @@ private final class TCPServer {
                     case .ready:
                         self.receive(connection)
 
+                    case .waiting(let error):
+                        print("⏳ Connection waiting:", error)
+                        self.close(connection, cancel: true)
+
                     case .failed(let error):
                         print("❌ Connection failed:", error)
-                        self.remove(connection)
+                        self.close(connection, cancel: false)
 
                     case .cancelled:
                         print("🔌 Connection cancelled")
-                        self.remove(connection)
+                        self.close(connection, cancel: false)
                     default:
                         break
                     }
@@ -176,7 +180,6 @@ private final class TCPServer {
             //self.receive(connection)
         }
         
-        listener.newConnectionLimit = 1
         listener.stateUpdateHandler = { [weak self] state in
             debugPrint("Listener State \(state)")
             self?.listenerState.value = state
@@ -224,6 +227,7 @@ private final class TCPServer {
         connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { sizeData, _, _, error in
             guard let sizeData, sizeData.count == 4 else {
                 print("❌ Failed to read size:", error ?? "unknown")
+                self.close(connection, cancel: true)
                 return
             }
 
@@ -237,6 +241,7 @@ private final class TCPServer {
             chunk, _, _, error in
             guard let chunk, !chunk.isEmpty else {
                 print("❌ Failed to read frame:", error ?? "unknown")
+                self.close(connection, cancel: true)
                 return
             }
             
@@ -254,6 +259,16 @@ private final class TCPServer {
                 // read next frame
                 self.readSize(connection)
             }
+        }
+    }
+
+    private func close(_ connection: NWConnection, cancel: Bool) {
+        if cancel {
+            connection.cancel()
+        }
+        lock.withLock {
+            remove(connection)
+            connectionStates.last!.value = .cancelled
         }
     }
 }

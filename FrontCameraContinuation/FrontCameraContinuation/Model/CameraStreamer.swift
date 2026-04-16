@@ -39,21 +39,27 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var frameIndex: Int = 0
     private var encodedWidth: Int32 = 0
     private var encodedHeight: Int32 = 0
+    private var shouldAutoResume = false
+    private var currentHost: String?
+    private var currentPort: UInt16?
+    private var currentPosition: AVCaptureDevice.Position = .front
 
     func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position) {
+        currentHost = host
+        currentPort = port
+        currentPosition = position
+        shouldAutoResume = true
+
         let res = setupConnection(host: host, port: port)
         assert(res)
         try? setupCamera(position: position)
     }
     
     func stopStreaming() {
+        shouldAutoResume = false
         NotificationCenter.default.removeObserver(self)
         UIDevice.current.endGeneratingDeviceOrientationNotifications()
-        DispatchQueue.global(qos: .default).async { [weak session] in
-            session?.stopRunning()
-        }
-        invalidateEncoder()
-        connection?.cancel()
+        stopCaptureAndConnection()
     }
 
     // MARK: - TCP
@@ -63,6 +69,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         guard let p = NWEndpoint.Port(rawValue: port) else {
             return false
         }
+
+        connection?.cancel()
         
         let endpoint = NWEndpoint.Host(host)
         let connection = NWConnection(host: endpoint, port: p, using: .tcp)
@@ -101,6 +109,14 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     private func setupCamera(position: AVCaptureDevice.Position) throws {
         guard session.inputs.isEmpty else {
+            configureVideoConnection()
+            beginOrientationUpdates()
+            beginSessionInterruptionUpdates()
+            beginAppActivationUpdates()
+            DispatchQueue.global(qos: .default).async { [weak session] in
+                guard let session, !session.isRunning else { return }
+                session.startRunning()
+            }
             return
         }
         session.beginConfiguration()
@@ -120,6 +136,16 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         videoOutput = output
         configureVideoConnection()
         session.commitConfiguration()
+        beginOrientationUpdates()
+        beginSessionInterruptionUpdates()
+        beginAppActivationUpdates()
+        DispatchQueue.global(qos: .default).async { [weak session] in
+            session?.startRunning()
+        }
+    }
+
+    private func beginOrientationUpdates() {
+        NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
         UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         NotificationCenter.default.addObserver(
             self,
@@ -127,9 +153,105 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             name: UIDevice.orientationDidChangeNotification,
             object: nil
         )
-        DispatchQueue.global(qos: .default).async { [weak session] in
-            session?.startRunning()
+    }
+
+    private func beginSessionInterruptionUpdates() {
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.removeObserver(self, name: AVCaptureSession.wasInterruptedNotification, object: session)
+        notificationCenter.removeObserver(self, name: AVCaptureSession.interruptionEndedNotification, object: session)
+        notificationCenter.removeObserver(self, name: AVCaptureSession.runtimeErrorNotification, object: session)
+
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(sessionWasInterrupted),
+            name: AVCaptureSession.wasInterruptedNotification,
+            object: session
+        )
+
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(sessionInterruptionEnded),
+            name: AVCaptureSession.interruptionEndedNotification,
+            object: session
+        )
+
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(sessionRuntimeError),
+            name: AVCaptureSession.runtimeErrorNotification,
+            object: session
+        )
+    }
+
+    private func beginAppActivationUpdates() {
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+        notificationCenter.addObserver(
+            self,
+            selector: #selector(appDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func sessionWasInterrupted(_ notification: Notification) {
+        if let rawReason = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int,
+           let reason = AVCaptureSession.InterruptionReason(rawValue: rawReason) {
+            debugPrint("Capture session interrupted: \(reason)")
+        } else {
+            debugPrint("Capture session interrupted")
         }
+
+        guard shouldAutoResume else { return }
+        invalidateEncoder()
+        connection?.cancel()
+        connection = nil
+    }
+
+    @objc private func sessionInterruptionEnded(_ notification: Notification) {
+        debugPrint("Capture session interruption ended")
+        restartStreamingAfterCaptureRecovery()
+    }
+
+    @objc private func sessionRuntimeError(_ notification: Notification) {
+        let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError
+        debugPrint("Capture session runtime error: \(String(describing: error))")
+
+        guard shouldAutoResume else { return }
+        invalidateEncoder()
+        restartStreamingAfterCaptureRecovery()
+    }
+
+    @objc private func appDidBecomeActive(_ notification: Notification) {
+        debugPrint("App became active; checking stream recovery")
+        restartStreamingAfterCaptureRecovery()
+    }
+
+    private func restartStreamingAfterCaptureRecovery() {
+        guard shouldAutoResume,
+              let host = currentHost,
+              let port = currentPort else { return }
+
+        invalidateEncoder()
+        setupConnection(host: host, port: port)
+        configureVideoConnection()
+        beginOrientationUpdates()
+        beginSessionInterruptionUpdates()
+        beginAppActivationUpdates()
+
+        DispatchQueue.global(qos: .default).async { [weak session] in
+            guard let session, !session.isRunning else { return }
+            session.startRunning()
+        }
+    }
+
+    private func stopCaptureAndConnection() {
+        DispatchQueue.global(qos: .default).async { [weak session] in
+            session?.stopRunning()
+        }
+        invalidateEncoder()
+        connection?.cancel()
+        connection = nil
     }
 
     private func configureVideoConnection() {
