@@ -8,7 +8,7 @@
 
 import VideoToolbox
 import QuartzCore
-import AVFoundation
+import Combine
 
 final class H264Decoder {
 
@@ -17,7 +17,7 @@ final class H264Decoder {
 
     private var sps: Data?
     private var pps: Data?
-    var displayLayer: AVSampleBufferDisplayLayer?
+    let decodedFramePublisher = PassthroughSubject<CMSampleBuffer, Never>()
     
     func decode(_ data: Data) {
         // Detect NAL type
@@ -25,7 +25,7 @@ final class H264Decoder {
         guard data.count > 4 else { return }
 
         let nalType = data[4] & 0x1F
-        print("📦 NAL type:", nalType)
+        debugPrint("📦 NAL type:", nalType)
         
         switch nalType {
         case 7: // SPS
@@ -35,7 +35,7 @@ final class H264Decoder {
                 pps = nil
             }
             sps = newSPS
-            print("📡 SPS received:", sps!.count)
+            debugPrint("📡 SPS received:", newSPS.count)
             createFormatDescriptionIfPossible()
 
         case 8: // PPS
@@ -44,16 +44,16 @@ final class H264Decoder {
                 resetDecoder()
             }
             pps = newPPS
-            print("📡 PPS received:", pps!.count)
+            debugPrint("📡 PPS received:", newPPS.count)
             createFormatDescriptionIfPossible()
 
         default:
             guard let session else {
-                print("⏳ Waiting for decoder setup...")
+                debugPrint("⏳ Waiting for decoder setup...")
                 return
             }
 
-            decodeFrame(data)
+            decodeFrame(data, session: session)
         }
     }
 
@@ -75,16 +75,20 @@ final class H264Decoder {
         guard let sps, let pps else { return }
         if session != nil { return }
 
-        sps.withUnsafeBytes { spsPtr in
+        formatDescription = sps.withUnsafeBytes { spsPtr in
             pps.withUnsafeBytes { ppsPtr in
+                
+                let ptrs = [spsPtr, ppsPtr]
+                let parameterSetPointers = ptrs.map { $0.bindMemory(to: UInt8.self).baseAddress }.compactMap { $0 }
+                
+                guard parameterSetPointers.count == ptrs.count else {
+                    return nil
+                }
 
-                let parameterSetPointers: [UnsafePointer<UInt8>] = [
-                    spsPtr.bindMemory(to: UInt8.self).baseAddress!,
-                    ppsPtr.bindMemory(to: UInt8.self).baseAddress!
-                ]
-
-                let parameterSetSizes: [Int] = [sps.count, pps.count]
-
+                let parameterSetSizes = ptrs.map(\.count)
+                assert(parameterSetSizes.count == 2)
+                
+                var formatDescription: CMFormatDescription?
                 let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
                     allocator: kCFAllocatorDefault,
                     parameterSetCount: 2,
@@ -93,13 +97,16 @@ final class H264Decoder {
                     nalUnitHeaderLength: 4,
                     formatDescriptionOut: &formatDescription
                 )
-
-                if status != noErr {
-                    print("❌ Failed to create format description:", status)
-                    return
+                
+                guard let formatDescription = Self.valueOnStatusSuccess(formatDescription, status: status) else {
+                    debugPrint("❌ Failed to create format description:", status)
+                    return nil
                 }
+                
+                return formatDescription
             }
         }
+        
 
         if let formatDescription {
             createDecompressionSession(formatDescription: formatDescription)
@@ -112,20 +119,21 @@ final class H264Decoder {
             decompressionOutputRefCon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         )
 
-        VTDecompressionSessionCreate(
+        var sessionOut: VTDecompressionSession?
+        let status = VTDecompressionSessionCreate(
             allocator: kCFAllocatorDefault,
             formatDescription: formatDescription,
             decoderSpecification: nil,
             imageBufferAttributes: nil,
             outputCallback: &callback,
-            decompressionSessionOut: &session
+            decompressionSessionOut: &sessionOut
         )
-
-        print("🎬 Decoder session created")
+        session = Self.valueOnStatusSuccess(sessionOut, status: status)
+        debugPrint(sessionOut != nil ? "🎬 Created Decoder session" : "❌ Failed Decoder session")
     }
 
-    private func decodeFrame(_ data: Data) {
-        guard let session, let formatDescription else { return }
+    private func decodeFrame(_ data: Data, session: VTDecompressionSession) {
+        guard let formatDescription else { return }
 
         // Convert Annex-B → AVCC (replace start code with length)
         var length = UInt32(data.count - 4).bigEndian
@@ -133,7 +141,7 @@ final class H264Decoder {
         buffer.append(data.advanced(by: 4))
 
         var blockBuffer: CMBlockBuffer?
-        CMBlockBufferCreateWithMemoryBlock(
+        let status = CMBlockBufferCreateWithMemoryBlock(
             allocator: kCFAllocatorDefault,
             memoryBlock: nil,
             blockLength: buffer.count,
@@ -144,15 +152,21 @@ final class H264Decoder {
             flags: 0,
             blockBufferOut: &blockBuffer
         )
+        
+        guard let blockBuffer = Self.valueOnStatusSuccess(blockBuffer, status: status) else { return }
 
-        buffer.withUnsafeBytes { ptr in
-            CMBlockBufferReplaceDataBytes(
-                with: ptr.baseAddress!,
-                blockBuffer: blockBuffer!,
-                offsetIntoDestination: 0,
-                dataLength: buffer.count
-            )
+        let replaceStatus = buffer.withUnsafeBytes { ptr in
+            ptr.baseAddress.flatMap { baseAddress in
+                CMBlockBufferReplaceDataBytes(
+                    with: baseAddress,
+                    blockBuffer: blockBuffer,
+                    offsetIntoDestination: 0,
+                    dataLength: buffer.count
+                )
+            }
         }
+        
+        guard Self.valueOnStatusSuccess((), status: replaceStatus) != nil else { return }
 
         var sampleBuffer: CMSampleBuffer?
         var timing = CMSampleTimingInfo(
@@ -161,7 +175,7 @@ final class H264Decoder {
             decodeTimeStamp: .invalid
         )
 
-        CMSampleBufferCreateReady(
+        let createStatus = CMSampleBufferCreateReady(
             allocator: kCFAllocatorDefault,
             dataBuffer: blockBuffer,
             formatDescription: formatDescription,
@@ -173,34 +187,39 @@ final class H264Decoder {
             sampleBufferOut: &sampleBuffer
         )
 
-        guard let sampleBuffer else { return }
+        guard let sampleBuffer = Self.valueOnStatusSuccess(sampleBuffer, status: createStatus) else { return }
 
-        VTDecompressionSessionDecodeFrame(
+        var flags = VTDecodeInfoFlags()
+        let decodeStatus = VTDecompressionSessionDecodeFrame(
             session,
             sampleBuffer: sampleBuffer,
             flags: [],
             frameRefcon: nil,
-            infoFlagsOut: nil
+            infoFlagsOut: &flags
         )
+        
+        guard let flags = Self.valueOnStatusSuccess(flags, status: decodeStatus) else { return }
     }
 
     private let decompressionCallback: VTDecompressionOutputCallback = {
         (refCon, _, status, _, imageBuffer, _, _) in
 
-        guard status == noErr, let imageBuffer else { return }
+        guard let imageBuffer = H264Decoder.valueOnStatusSuccess(imageBuffer, status: status), let refCon else { return }
 
-        let decoder = Unmanaged<H264Decoder>.fromOpaque(refCon!).takeUnretainedValue()
+        let decoder = Unmanaged<H264Decoder>.fromOpaque(refCon).takeUnretainedValue()
 
         decoder.handleDecodedFrame(imageBuffer)
     }
     
     func makeSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
         var format: CMFormatDescription?
-        CMVideoFormatDescriptionCreateForImageBuffer(
+        let status = CMVideoFormatDescriptionCreateForImageBuffer(
             allocator: kCFAllocatorDefault,
             imageBuffer: pixelBuffer,
             formatDescriptionOut: &format
         )
+        
+        guard let format = Self.valueOnStatusSuccess(format, status: status) else { return nil }
 
         var timing = CMSampleTimingInfo(
             duration: .invalid,
@@ -209,26 +228,35 @@ final class H264Decoder {
         )
 
         var sampleBuffer: CMSampleBuffer?
-        CMSampleBufferCreateForImageBuffer(
+        let bufferStatus = CMSampleBufferCreateForImageBuffer(
             allocator: kCFAllocatorDefault,
             imageBuffer: pixelBuffer,
             dataReady: true,
             makeDataReadyCallback: nil,
             refcon: nil,
-            formatDescription: format!,
+            formatDescription: format,
             sampleTiming: &timing,
             sampleBufferOut: &sampleBuffer
         )
-
-        return sampleBuffer
+        
+        return Self.valueOnStatusSuccess(sampleBuffer, status:bufferStatus)
+    }
+    
+    private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus) -> T! {
+        guard status == noErr else { return nil }
+        assert(value != nil)
+        return value
+    }
+    
+    private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus?) -> T! {
+        status.flatMap { valueOnStatusSuccess(value, status: $0) }
     }
 
     private func handleDecodedFrame(_ pixelBuffer: CVImageBuffer) {
-        guard let displayLayer else { return }
+        
         guard let sampleBuffer = makeSampleBuffer(from: pixelBuffer) else { return }
 
-        DispatchQueue.main.async {
-            displayLayer.sampleBufferRenderer.enqueue(sampleBuffer)
-        }
+        decodedFramePublisher.send(sampleBuffer)
+        
     }
 }

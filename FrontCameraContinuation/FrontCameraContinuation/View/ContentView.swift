@@ -47,6 +47,10 @@ struct ContentView: View {
                     isStreaming = true
                 }
             }
+            .onReceive(manager.isConnectedPublisher) { isStreaming in
+                guard isStreaming != self.isStreaming else { return }
+                self.isStreaming = isStreaming
+            }
             Spacer()
         }
         .padding()

@@ -10,78 +10,7 @@ import AVFoundation
 import VideoToolbox
 import Network
 import UIKit
-
-enum StreamSize: String, CaseIterable, Identifiable {
-    case full
-    case hd720
-    case hd1920x1080
-    case vga
-    case medium
-    case low
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .full:
-            return "Default(High Quality Output)"
-        case .hd1920x1080:
-            return "1920 x 1080"
-        case .hd720:
-            return "1280 x 720"
-        case .vga:
-            return "640 x 480"
-        case .medium:
-            return "Medium"
-        case .low:
-            return "Low"
-        }
-    }
-
-    var sessionPreset: AVCaptureSession.Preset {
-        switch self {
-        case .full:
-            return .high
-        case .hd1920x1080:
-            return .hd1920x1080
-        case .hd720:
-            return .hd1280x720
-        case .vga:
-            return .vga640x480
-        case .medium:
-            return .medium
-        case .low:
-            return .low
-        }
-    }
-}
-
-struct StreamManager {
-    private let cameraStreamer = CameraStreamer()
-    
-    func startStreaming(host: String = "192.168.1.10",
-                        port: UInt16 = 9999,
-                        streamSize: StreamSize = .full) {
-        cameraStreamer.startStreaming(
-            host: host,
-            port: port,
-            position: .front,
-            streamSize: streamSize
-        )
-    }
-    
-    func stopStreaming() {
-        cameraStreamer.stopStreaming()
-    }
-    
-    private func canSetPresent(size: StreamSize) -> Bool {
-        cameraStreamer.session.canSetSessionPreset(size.sessionPreset)
-    }
-    
-    func supportedCameraSessionPresets() -> [StreamSize] {
-        StreamSize.allCases.filter {canSetPresent(size: $0)}
-    }
-}
+import Combine
 
 final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
 
@@ -99,6 +28,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var currentPort: UInt16?
     private var currentPosition: AVCaptureDevice.Position = .front
     private var currentStreamSize: StreamSize = .full
+    
+    let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
 
     func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, streamSize: StreamSize) {
         currentHost = host
@@ -109,7 +40,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         let res = setupConnection(host: host, port: port)
         assert(res)
-        try? setupCamera(position: position, streamSize: streamSize)
+        try? setupCamera(position: position,
+                         preset: streamSize.sessionPreset)
     }
     
     func stopStreaming() {
@@ -132,19 +64,32 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         let endpoint = NWEndpoint.Host(host)
         let connection = NWConnection(host: endpoint, port: p, using: .tcp)
         
-        connection.stateUpdateHandler = { newState in
-            debugPrint("New State \(newState)")
+        // !!! New State failed(POSIXErrorCode(rawValue: 54): Connection reset by peer)
+        connection.stateUpdateHandler = { [weak self] newState in
+            debugPrint("!!! New State \(newState)")
+            let isReady: Bool
+            if case .ready = newState {
+                isReady = true
+            } else {
+                isReady = false
+                if case .failed = newState { // socket closed etc..
+                    // if error.errorCode == 54 || error.errorCode == 57
+                    // self?.
+                    self?.stopStreaming()
+                }
+            }
+            self?.isConnectedPublisher.value = isReady
         }
         connection.pathUpdateHandler = { newPath in
-            debugPrint("New Path \(newPath.debugDescription)")
+            debugPrint("!!! New Path \(newPath.debugDescription)")
         }
         
         connection.viabilityUpdateHandler = { isViable in
-            debugPrint("isViable \(isViable)")
+            debugPrint("!!! isViable \(isViable)") // data can be send and received..
         }
         
         connection.betterPathUpdateHandler = { newHasBetterPath in
-            debugPrint("newHasBetterPath \(newHasBetterPath)")
+            debugPrint("!!! newHasBetterPath \(newHasBetterPath)")
         }
         
         connection.start(queue: .global())
@@ -159,48 +104,57 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         connection?.send(content: header + data, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ error in
             guard let error else { return }
             debugPrint("!!! Error: \(error.localizedDescription)")
+            let disconnectedSocket = error.errorCode == 57 || error.errorCode == 54 // closed connection...
         }))
     }
 
     // MARK: - Camera
-
-    private func setupCamera(position: AVCaptureDevice.Position, streamSize: StreamSize) throws {
-        guard session.inputs.isEmpty else {
-            applySessionPreset(streamSize.sessionPreset)
-            configureVideoConnection()
-            beginOrientationUpdates()
-            beginSessionInterruptionUpdates()
-            beginAppActivationUpdates()
-            DispatchQueue.global(qos: .default).async { [weak session] in
-                guard let session, !session.isRunning else { return }
-                session.startRunning()
-            }
-            return
-        }
-        session.beginConfiguration()
-        applySessionPreset(streamSize.sessionPreset)
-
-        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)!
-        let input = try AVCaptureDeviceInput(device: device)
-        if session.canAddInput(input) {
-            session.addInput(input)
+    
+    private func configureSession(preset: AVCaptureSession.Preset,
+                                  inBatch: Bool = true,
+                                  position: AVCaptureDevice.Position? = nil) throws {
+        if inBatch {
+            session.beginConfiguration()
         }
         
-        let output = AVCaptureVideoDataOutput()
-        output.setSampleBufferDelegate(self, queue: captureQueue)
+        applySessionPreset(preset)
+        
+        if let position {
+            let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position) ?? AVCaptureDevice.default(for: .video)
+            let input = try device.flatMap { try AVCaptureDeviceInput(device: $0) }
+            if let input, session.canAddInput(input) {
+                session.addInput(input)
+            }
+            
+            let output = AVCaptureVideoDataOutput()
+            output.setSampleBufferDelegate(self, queue: captureQueue)
 
-        if session.canAddOutput(output) {
-            session.addOutput(output)
+            if session.canAddOutput(output) {
+                session.addOutput(output)
+            }
+            videoOutput = output
         }
-        videoOutput = output
         configureVideoConnection()
-        session.commitConfiguration()
+        
+        if inBatch {
+            session.commitConfiguration()
+        }
+        
+        
         beginOrientationUpdates()
         beginSessionInterruptionUpdates()
         beginAppActivationUpdates()
+        
         DispatchQueue.global(qos: .default).async { [weak session] in
-            session?.startRunning()
+            guard let session, !session.isRunning else { return }
+            session.startRunning()
         }
+    }
+
+    private func setupCamera(position: AVCaptureDevice.Position,
+                             preset: AVCaptureSession.Preset) throws {
+        try configureSession(preset: preset,
+                             position: session.inputs.isEmpty ? position : nil)
     }
 
     private func applySessionPreset(_ preset: AVCaptureSession.Preset) {
@@ -276,6 +230,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         debugPrint("Capture session interruption ended")
         restartStreamingAfterCaptureRecovery()
     }
+    
+    // !!! Error: The operation couldn’t be completed. (Network.NWError error 57 - Socket is not connected)"
 
     @objc private func sessionRuntimeError(_ notification: Notification) {
         let error = notification.userInfo?[AVCaptureSessionErrorKey] as? AVError
@@ -298,16 +254,8 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         invalidateEncoder()
         setupConnection(host: host, port: port)
-        applySessionPreset(currentStreamSize.sessionPreset)
-        configureVideoConnection()
-        beginOrientationUpdates()
-        beginSessionInterruptionUpdates()
-        beginAppActivationUpdates()
-
-        DispatchQueue.global(qos: .default).async { [weak session] in
-            guard let session, !session.isRunning else { return }
-            session.startRunning()
-        }
+    
+        try? configureSession(preset: currentStreamSize.sessionPreset)
     }
 
     private func stopCaptureAndConnection() {

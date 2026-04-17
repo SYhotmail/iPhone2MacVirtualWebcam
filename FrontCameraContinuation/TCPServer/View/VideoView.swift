@@ -7,7 +7,7 @@
 
 
 import AppKit
-import AVFoundation
+internal import AVFoundation
 
 class VideoView: NSView {
     let displayLayer = AVSampleBufferDisplayLayer()

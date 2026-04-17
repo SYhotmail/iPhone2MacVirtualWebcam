@@ -7,14 +7,15 @@
 
 import SwiftUI
 import Combine
+internal import AVFoundation
 
 struct ConnectView: View {
     let manager = ServerManager()
-    let videoView = VideoView()
     
     @State var isRunning = false
     @State var listenerStatus: String = ""
     @State var connectionStatus: String = ""
+    // @State var sampleBuffer: CMSampleBuffer?
     
     var body: some View {
         VStack(spacing: 12) {
@@ -27,10 +28,11 @@ struct ConnectView: View {
                     isRunning = true
                 }
             }
-            VideoViewRepresentable(videoView: videoView)
-                .onAppear {
-                    manager.decoder.displayLayer = videoView.displayLayer
-                }
+            VideoViewRepresentable(decoder: manager.decoder)
+                /*.onReceive(manager.decoder.decodedFramePublisher.receive(on: DispatchQueue.main)) { buffer in
+                    self.sampleBuffer = buffer
+                }*/
+            
             HStack {
                 Text("Listener: \(listenerStatus)")
                 Spacer()
