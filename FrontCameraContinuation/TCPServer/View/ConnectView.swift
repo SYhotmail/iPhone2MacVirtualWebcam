@@ -11,7 +11,7 @@ internal import AVFoundation
 
 struct ConnectView: View {
     let manager = ServerManager()
-    @StateObject private var installer = VirtualCameraInstaller()
+    @State private var installer = VirtualCameraInstaller()
     
     @State var isRunning = false
     @State var listenerStatus: String = ""

@@ -56,9 +56,9 @@ enum StreamSize: String, CaseIterable, Identifiable {
 struct StreamManager {
     private let cameraStreamer = CameraStreamer()
     
-    func startStreaming(host: String = "192.168.1.10",
-                        port: UInt16 = 9999,
-                        streamSize: StreamSize = .full) {
+    func startStreaming(host: String,
+                        port: UInt16,
+                        streamSize: StreamSize) {
         cameraStreamer.startStreaming(
             host: host,
             port: port,

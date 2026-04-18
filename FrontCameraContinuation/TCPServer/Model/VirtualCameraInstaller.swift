@@ -4,15 +4,17 @@ import AppKit
 import SystemExtensions
 
 @MainActor
-final class VirtualCameraInstaller: NSObject, ObservableObject {
-    @Published private(set) var status = "Not Installed"
-
+@Observable
+final class VirtualCameraInstaller: NSObject {
+    private(set) var status = "Not Installed"
+    private static let applicationPathPrefix = "/Applications"
+    
     func activate() {
         guard isRunningFromSystemApplicationsFolder else {
             if openInstalledAppIfAvailable() {
-                status = "Opened /Applications copy. Install the extension from that app."
+                status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
             } else {
-                status = "Run /Applications/TCPServer.app to install the extension."
+                status = "Run \(Self.applicationPathPrefix)/TCPServer.app to install the extension."
             }
             return
         }
@@ -28,11 +30,11 @@ final class VirtualCameraInstaller: NSObject, ObservableObject {
     }
 
     private var isRunningFromSystemApplicationsFolder: Bool {
-        Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix("/Applications/")
+        Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix("\(Self.applicationPathPrefix)/")
     }
 
     private func openInstalledAppIfAvailable() -> Bool {
-        let installedURL = URL(fileURLWithPath: "/Applications/\(Bundle.main.bundleURL.lastPathComponent)")
+        let installedURL = URL(fileURLWithPath: "\(Self.applicationPathPrefix)/\(Bundle.main.bundleURL.lastPathComponent)")
         guard FileManager.default.fileExists(atPath: installedURL.path) else {
             return false
         }

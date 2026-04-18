@@ -134,11 +134,20 @@ final class SharedFrameWriter {
 
         let image = CIImage(cvPixelBuffer: imageBuffer)
         let targetRect = CGRect(x: 0, y: 0, width: VirtualCameraConfiguration.streamWidth, height: VirtualCameraConfiguration.streamHeight)
-        let scaleX = targetRect.width / image.extent.width
-        let scaleY = targetRect.height / image.extent.height
-        let scaledImage = image.transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+        let scale = min(targetRect.width / image.extent.width, targetRect.height / image.extent.height)
+        let scaledSize = CGSize(width: image.extent.width * scale, height: image.extent.height * scale)
+        let origin = CGPoint(
+            x: (targetRect.width - scaledSize.width) / 2,
+            y: (targetRect.height - scaledSize.height) / 2
+        )
 
-        context.render(scaledImage, to: pixelBuffer, bounds: targetRect, colorSpace: CGColorSpaceCreateDeviceRGB())
+        let scaledImage = image
+            .transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+            .transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y))
+        let backgroundImage = CIImage(color: .black).cropped(to: targetRect)
+        let compositedImage = scaledImage.composited(over: backgroundImage)
+
+        context.render(compositedImage, to: pixelBuffer, bounds: targetRect, colorSpace: CGColorSpaceCreateDeviceRGB())
         return pixelBuffer
     }
 
@@ -158,7 +167,8 @@ final class SharedFrameReader {
             return nil
         }
 
-        let expectedPayloadSize = Int(header.bytesPerRow) * Int(header.height)
+        let sourceBytesPerRow = Int(header.bytesPerRow)
+        let expectedPayloadSize = sourceBytesPerRow * Int(header.height)
         let payloadOffset = SharedFrameHeader.encodedSize
         guard data.count >= payloadOffset + expectedPayloadSize else { return nil }
 
@@ -185,10 +195,16 @@ final class SharedFrameReader {
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, []) }
 
         guard let destination = CVPixelBufferGetBaseAddress(pixelBuffer) else { return nil }
+        let destinationBytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let rowCopySize = min(sourceBytesPerRow, destinationBytesPerRow)
 
         data.withUnsafeBytes { rawBuffer in
             guard let source = rawBuffer.baseAddress?.advanced(by: payloadOffset) else { return }
-            memcpy(destination, source, expectedPayloadSize)
+            for row in 0..<Int(header.height) {
+                let sourceRow = source.advanced(by: row * sourceBytesPerRow)
+                let destinationRow = destination.advanced(by: row * destinationBytesPerRow)
+                memcpy(destinationRow, sourceRow, rowCopySize)
+            }
         }
 
         return SharedFrame(

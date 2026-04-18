@@ -106,7 +106,10 @@ final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSou
     private func pushLatestFrame() {
         guard let sharedFrame = frameReader.readFrame(),
               sharedFrame.sequenceNumber != lastSequenceNumber,
-              let sampleBuffer = makeSampleBuffer(from: sharedFrame.pixelBuffer) else {
+              let sampleBuffer = makeSampleBuffer(
+                from: sharedFrame.pixelBuffer,
+                hostTimeInNanoseconds: sharedFrame.hostTimeInNanoseconds
+              ) else {
             return
         }
         
@@ -114,11 +117,15 @@ final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSou
         streamSource.stream.send(sampleBuffer, discontinuity: [], hostTimeInNanoseconds: sharedFrame.hostTimeInNanoseconds)
     }
     
-    private func makeSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
+    private func makeSampleBuffer(from pixelBuffer: CVPixelBuffer, hostTimeInNanoseconds: UInt64) -> CMSampleBuffer? {
         var sampleBuffer: CMSampleBuffer?
+        let presentationTimeStamp = CMTime(
+            value: Int64(hostTimeInNanoseconds),
+            timescale: 1_000_000_000
+        )
         var timingInfo = CMSampleTimingInfo(
             duration: VirtualCameraConfiguration.frameDuration,
-            presentationTimeStamp: .invalid,
+            presentationTimeStamp: presentationTimeStamp,
             decodeTimeStamp: .invalid
         )
         
