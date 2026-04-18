@@ -6,12 +6,67 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		2139DC362F92E69B00ECF1D1 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 215482B82F91423800163538 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 2139DC2D2F92E69B00ECF1D1;
+			remoteInfo = VirtualCameraExtension;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		21B65AE32F92CEE100F00A29 /* Embed System Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
+			dstSubfolderSpec = 16;
+			files = (
+				2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension in Embed System Extensions */,
+			);
+			name = "Embed System Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
+		2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = by.sy.TCPServer.VirtualCameraExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482C02F91423800163538 /* FrontCameraContinuation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FrontCameraContinuation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482D62F9143A900163538 /* TCPServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TCPServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		2139DC392F92E69B00ECF1D1 /* Exceptions for "VirtualCameraExtension" folder in "VirtualCameraExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
+		};
+		2139DC3F2F92E7C200ECF1D1 /* Exceptions for "Shared" folder in "VirtualCameraExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				SharedFrameStore.swift,
+				VirtualCameraConfiguration.swift,
+			);
+			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		2139DC2F2F92E69B00ECF1D1 /* VirtualCameraExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2139DC392F92E69B00ECF1D1 /* Exceptions for "VirtualCameraExtension" folder in "VirtualCameraExtension" target */,
+			);
+			path = VirtualCameraExtension;
+			sourceTree = "<group>";
+		};
 		215482C22F91423800163538 /* FrontCameraContinuation */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = FrontCameraContinuation;
@@ -22,9 +77,24 @@
 			path = TCPServer;
 			sourceTree = "<group>";
 		};
+		A10000022F9143AA00163538 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2139DC3F2F92E7C200ECF1D1 /* Exceptions for "Shared" folder in "VirtualCameraExtension" target */,
+			);
+			path = Shared;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		2139DC2B2F92E69B00ECF1D1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		215482BD2F91423800163538 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -47,6 +117,8 @@
 			children = (
 				215482C22F91423800163538 /* FrontCameraContinuation */,
 				215482D72F9143A900163538 /* TCPServer */,
+				A10000022F9143AA00163538 /* Shared */,
+				2139DC2F2F92E69B00ECF1D1 /* VirtualCameraExtension */,
 				215482C12F91423800163538 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -56,6 +128,7 @@
 			children = (
 				215482C02F91423800163538 /* FrontCameraContinuation.app */,
 				215482D62F9143A900163538 /* TCPServer.app */,
+				2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -63,6 +136,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2139DC3A2F92E69B00ECF1D1 /* Build configuration list for PBXNativeTarget "VirtualCameraExtension" */;
+			buildPhases = (
+				2139DC2A2F92E69B00ECF1D1 /* Sources */,
+				2139DC2B2F92E69B00ECF1D1 /* Frameworks */,
+				2139DC2C2F92E69B00ECF1D1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				2139DC2F2F92E69B00ECF1D1 /* VirtualCameraExtension */,
+			);
+			name = VirtualCameraExtension;
+			packageProductDependencies = (
+			);
+			productName = VirtualCameraExtension;
+			productReference = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */;
+			productType = "com.apple.product-type.system-extension";
+		};
 		215482BF2F91423800163538 /* FrontCameraContinuation */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 215482CB2F91423900163538 /* Build configuration list for PBXNativeTarget "FrontCameraContinuation" */;
@@ -92,13 +187,16 @@
 				215482D22F9143A900163538 /* Sources */,
 				215482D32F9143A900163538 /* Frameworks */,
 				215482D42F9143A900163538 /* Resources */,
+				21B65AE32F92CEE100F00A29 /* Embed System Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				2139DC372F92E69B00ECF1D1 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				215482D72F9143A900163538 /* TCPServer */,
+				A10000022F9143AA00163538 /* Shared */,
 			);
 			name = TCPServer;
 			packageProductDependencies = (
@@ -117,6 +215,9 @@
 				LastSwiftUpdateCheck = 2640;
 				LastUpgradeCheck = 2640;
 				TargetAttributes = {
+					2139DC2D2F92E69B00ECF1D1 = {
+						CreatedOnToolsVersion = 26.4;
+					};
 					215482BF2F91423800163538 = {
 						CreatedOnToolsVersion = 26.4;
 					};
@@ -141,11 +242,19 @@
 			targets = (
 				215482BF2F91423800163538 /* FrontCameraContinuation */,
 				215482D52F9143A900163538 /* TCPServer */,
+				2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		2139DC2C2F92E69B00ECF1D1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		215482BE2F91423800163538 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -163,6 +272,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		2139DC2A2F92E69B00ECF1D1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		215482BC2F91423800163538 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -179,7 +295,83 @@
 		};
 /* End PBXSourcesBuildPhase section */
 
+/* Begin PBXTargetDependency section */
+		2139DC372F92E69B00ECF1D1 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
+			targetProxy = 2139DC362F92E69B00ECF1D1 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
 /* Begin XCBuildConfiguration section */
+		2139DC3B2F92E69B00ECF1D1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = VirtualCameraExtension/VirtualCameraExtension.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 44P2L32FL4;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = VirtualCameraExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = VirtualCameraExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.3;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.VirtualCameraExtension;
+				PRODUCT_NAME = "$(inherited)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		2139DC3C2F92E69B00ECF1D1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = VirtualCameraExtension/VirtualCameraExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 44P2L32FL4;
+				ENABLE_APP_SANDBOX = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = VirtualCameraExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = VirtualCameraExtension;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@executable_path/../../../../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.3;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.VirtualCameraExtension;
+				PRODUCT_NAME = "$(inherited)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = macosx;
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 		215482C92F91423900163538 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -374,6 +566,9 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = TCPServer/TCPServer.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Development";
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -391,9 +586,11 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use front camera as a system camera";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -402,6 +599,7 @@
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -418,6 +616,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = TCPServer/TCPServer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -435,9 +634,11 @@
 				ENABLE_RESOURCE_ACCESS_LOCATION = NO;
 				ENABLE_RESOURCE_ACCESS_PRINTING = NO;
 				ENABLE_RESOURCE_ACCESS_USB = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use front camera as a system camera";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -460,6 +661,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		2139DC3A2F92E69B00ECF1D1 /* Build configuration list for PBXNativeTarget "VirtualCameraExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2139DC3B2F92E69B00ECF1D1 /* Debug */,
+				2139DC3C2F92E69B00ECF1D1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		215482BB2F91423800163538 /* Build configuration list for PBXProject "FrontCameraContinuation" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

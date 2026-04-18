@@ -47,7 +47,7 @@ struct VideoViewRepresentable: NSViewRepresentable {
         private var cancellable: AnyCancellable?
         
         func bind(decoder: H264Decoder) {
-            cancellable = decoder.decodedFramePublisher.receive(on: RunLoop.main).sink { [weak self] buffer in
+            cancellable = decoder.decodedFramePublisher.share().receive(on: RunLoop.main).sink { [weak self] buffer in
                 self?.nsView?.displayLayer.sampleBufferRenderer.enqueue(buffer)
             }
         }

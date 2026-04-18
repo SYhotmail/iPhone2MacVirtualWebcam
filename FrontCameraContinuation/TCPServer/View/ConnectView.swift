@@ -11,6 +11,7 @@ internal import AVFoundation
 
 struct ConnectView: View {
     let manager = ServerManager()
+    @StateObject private var installer = VirtualCameraInstaller()
     
     @State var isRunning = false
     @State var listenerStatus: String = ""
@@ -19,13 +20,18 @@ struct ConnectView: View {
     
     var body: some View {
         VStack(spacing: 12) {
-            Button(isRunning ? "Stop" : "Start") {
-                if isRunning {
-                    manager.stop()
-                    isRunning = false
-                } else {
-                    manager.start()
-                    isRunning = true
+            HStack {
+                Button(isRunning ? "Stop" : "Start") {
+                    if isRunning {
+                        manager.stop()
+                        isRunning = false
+                    } else {
+                        manager.start()
+                        isRunning = true
+                    }
+                }
+                Button("Install Virtual Camera") {
+                    installer.activate()
                 }
             }
             VideoViewRepresentable(decoder: manager.decoder)
@@ -38,6 +44,12 @@ struct ConnectView: View {
                 Spacer()
                 Text("Connection: \(connectionStatus)")
             }
+            Text("Virtual Camera: \(installer.status)")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Move the built app to /Applications before installing the extension.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
             .frame(maxWidth: .infinity)
             .padding(8)
             .padding(.bottom, 6)

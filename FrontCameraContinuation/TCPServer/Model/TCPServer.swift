@@ -15,6 +15,8 @@ import CoreVideo
 
 final class ServerManager {
     private let server = TCPServer()
+    private let frameWriter = SharedFrameWriter()
+    private var decodedFrameCancellable: AnyCancellable?
     let decoder = H264Decoder()
     
     var listenerStatusPublisher: AnyPublisher<String, Never> {
@@ -30,6 +32,13 @@ final class ServerManager {
     }
     
     func start(port: UInt16 = 9999) {
+        decodedFrameCancellable = decoder.decodedFramePublisher
+            .share()
+            .receive(on: DispatchQueue.global(qos: .userInitiated))
+            .sink { [weak frameWriter] sampleBuffer in
+                frameWriter?.publish(sampleBuffer)
+            }
+
         server.onFrame = { [weak self] data in
             self?.decoder.decode(data)
         }
@@ -44,6 +53,8 @@ final class ServerManager {
     func stop() {
         server.onFrame = nil
         server.onStreamUnavailable = nil
+        decodedFrameCancellable = nil
+        frameWriter.clear()
         decoder.resetForStreamRestart()
         server.stop()
     }
