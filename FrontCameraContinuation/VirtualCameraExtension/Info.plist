@@ -5,9 +5,9 @@
 	<key>CMIOExtension</key>
 	<dict>
 		<key>CMIOExtensionMachServiceName</key>
-		<string>$(TeamIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+		<string>$(TeamIdentifierPrefix)by.sy.TCPServer</string>
 	</dict>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>SYSTEM_EXTENSION_USAGE_DESCRIPTION</string>
+	<string>Remote TCP Camera</string>
 </dict>
 </plist>
