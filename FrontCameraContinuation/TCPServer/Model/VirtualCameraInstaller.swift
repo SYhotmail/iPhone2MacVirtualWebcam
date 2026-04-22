@@ -28,6 +28,26 @@ final class VirtualCameraInstaller: NSObject {
         request.delegate = self
         OSSystemExtensionManager.shared.submitRequest(request)
     }
+    
+    func deactivate() {
+        guard isRunningFromSystemApplicationsFolder else {
+            if openInstalledAppIfAvailable() {
+                status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
+            } else {
+                status = "Run \(Self.applicationPathPrefix)/TCPServer.app to install the extension."
+            }
+            return
+        }
+
+        status = "Requesting Activation"
+
+        let request = OSSystemExtensionRequest.deactivationRequest(
+            forExtensionWithIdentifier: VirtualCameraConfiguration.extensionBundleIdentifier,
+            queue: .main
+        )
+        request.delegate = self
+        OSSystemExtensionManager.shared.submitRequest(request)
+    }
 
     private var isRunningFromSystemApplicationsFolder: Bool {
         Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix("\(Self.applicationPathPrefix)/")

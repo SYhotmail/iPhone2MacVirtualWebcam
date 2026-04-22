@@ -15,7 +15,8 @@ import CoreVideo
 
 final class ServerManager {
     private let server = TCPServer()
-    private let frameWriter = SharedFrameWriter()
+    private let sinkClient = VirtualCameraSinkClient()
+    private let frameConverter = VirtualCameraSampleBufferConverter()
     private var decodedFrameCancellable: AnyCancellable?
     let decoder = H264Decoder()
     
@@ -32,11 +33,16 @@ final class ServerManager {
     }
     
     func start(port: UInt16 = 9999) {
+        sinkClient.start()
+
         decodedFrameCancellable = decoder.decodedFramePublisher
             .share()
             .receive(on: DispatchQueue.global(qos: .userInitiated))
-            .sink { [weak frameWriter] sampleBuffer in
-                frameWriter?.publish(sampleBuffer)
+            .compactMap { [frameConverter] sampleBuffer in
+                frameConverter.makeSampleBuffer(from: sampleBuffer)
+            }
+            .sink { [weak sinkClient] sampleBuffer in
+                sinkClient?.enqueue(sampleBuffer)
             }
 
         server.onFrame = { [weak self] data in
@@ -54,7 +60,7 @@ final class ServerManager {
         server.onFrame = nil
         server.onStreamUnavailable = nil
         decodedFrameCancellable = nil
-        frameWriter.clear()
+        sinkClient.stop()
         decoder.resetForStreamRestart()
         server.stop()
     }

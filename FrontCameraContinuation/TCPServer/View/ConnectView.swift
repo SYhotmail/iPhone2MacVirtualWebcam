@@ -30,9 +30,8 @@ struct ConnectView: View {
                         isRunning = true
                     }
                 }
-                Button("Install Virtual Camera") {
-                    installer.activate()
-                }
+                Button("Install Virtual Camera", action: installer.activate)
+                Button("Uninstall Virtual Camera", action: installer.deactivate)
             }
             VideoViewRepresentable(decoder: manager.decoder)
                 /*.onReceive(manager.decoder.decodedFramePublisher.receive(on: DispatchQueue.main)) { buffer in
