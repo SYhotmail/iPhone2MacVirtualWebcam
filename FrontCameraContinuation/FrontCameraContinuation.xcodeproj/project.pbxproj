@@ -8,7 +8,6 @@
 
 /* Begin PBXBuildFile section */
 		2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		21A08A092F93B18D00B44D63 /* by.sy.TCPServer.TempBro.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 21A089FF2F93B18D00B44D63 /* by.sy.TCPServer.TempBro.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -18,13 +17,6 @@
 			proxyType = 1;
 			remoteGlobalIDString = 2139DC2D2F92E69B00ECF1D1;
 			remoteInfo = VirtualCameraExtension;
-		};
-		21A08A072F93B18D00B44D63 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = 215482B82F91423800163538 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = 21A089FE2F93B18D00B44D63;
-			remoteInfo = TempBro;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -36,7 +28,6 @@
 			dstSubfolderSpec = 16;
 			files = (
 				2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension in Embed System Extensions */,
-				21A08A092F93B18D00B44D63 /* by.sy.TCPServer.TempBro.systemextension in Embed System Extensions */,
 			);
 			name = "Embed System Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -47,7 +38,6 @@
 		2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = by.sy.TCPServer.VirtualCameraExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482C02F91423800163538 /* FrontCameraContinuation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FrontCameraContinuation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482D62F9143A900163538 /* TCPServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TCPServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		21A089FF2F93B18D00B44D63 /* by.sy.TCPServer.TempBro.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = by.sy.TCPServer.TempBro.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -65,13 +55,6 @@
 				VirtualCameraConfiguration.swift,
 			);
 			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
-		};
-		21A08A0C2F93B18D00B44D63 /* Exceptions for "TempBro" folder in "TempBro" target */ = {
-			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
-			membershipExceptions = (
-				Info.plist,
-			);
-			target = 21A089FE2F93B18D00B44D63 /* TempBro */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -92,14 +75,6 @@
 		215482D72F9143A900163538 /* TCPServer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = TCPServer;
-			sourceTree = "<group>";
-		};
-		21A08A002F93B18D00B44D63 /* TempBro */ = {
-			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-				21A08A0C2F93B18D00B44D63 /* Exceptions for "TempBro" folder in "TempBro" target */,
-			);
-			path = TempBro;
 			sourceTree = "<group>";
 		};
 		A10000022F9143AA00163538 /* Shared */ = {
@@ -134,13 +109,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		21A089FC2F93B18D00B44D63 /* Frameworks */ = {
-			isa = PBXFrameworksBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -151,7 +119,6 @@
 				215482D72F9143A900163538 /* TCPServer */,
 				A10000022F9143AA00163538 /* Shared */,
 				2139DC2F2F92E69B00ECF1D1 /* VirtualCameraExtension */,
-				21A08A002F93B18D00B44D63 /* TempBro */,
 				215482C12F91423800163538 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -162,7 +129,6 @@
 				215482C02F91423800163538 /* FrontCameraContinuation.app */,
 				215482D62F9143A900163538 /* TCPServer.app */,
 				2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */,
-				21A089FF2F93B18D00B44D63 /* by.sy.TCPServer.TempBro.systemextension */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -227,7 +193,6 @@
 			);
 			dependencies = (
 				2139DC372F92E69B00ECF1D1 /* PBXTargetDependency */,
-				21A08A082F93B18D00B44D63 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				215482D72F9143A900163538 /* TCPServer */,
@@ -239,28 +204,6 @@
 			productName = TCPServer;
 			productReference = 215482D62F9143A900163538 /* TCPServer.app */;
 			productType = "com.apple.product-type.application";
-		};
-		21A089FE2F93B18D00B44D63 /* TempBro */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = 21A08A0D2F93B18D00B44D63 /* Build configuration list for PBXNativeTarget "TempBro" */;
-			buildPhases = (
-				21A089FB2F93B18D00B44D63 /* Sources */,
-				21A089FC2F93B18D00B44D63 /* Frameworks */,
-				21A089FD2F93B18D00B44D63 /* Resources */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			fileSystemSynchronizedGroups = (
-				21A08A002F93B18D00B44D63 /* TempBro */,
-			);
-			name = TempBro;
-			packageProductDependencies = (
-			);
-			productName = TempBro;
-			productReference = 21A089FF2F93B18D00B44D63 /* by.sy.TCPServer.TempBro.systemextension */;
-			productType = "com.apple.product-type.system-extension";
 		};
 /* End PBXNativeTarget section */
 
@@ -279,9 +222,6 @@
 						CreatedOnToolsVersion = 26.4;
 					};
 					215482D52F9143A900163538 = {
-						CreatedOnToolsVersion = 26.4;
-					};
-					21A089FE2F93B18D00B44D63 = {
 						CreatedOnToolsVersion = 26.4;
 					};
 				};
@@ -303,7 +243,6 @@
 				215482BF2F91423800163538 /* FrontCameraContinuation */,
 				215482D52F9143A900163538 /* TCPServer */,
 				2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */,
-				21A089FE2F93B18D00B44D63 /* TempBro */,
 			);
 		};
 /* End PBXProject section */
@@ -324,13 +263,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		215482D42F9143A900163538 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		21A089FD2F93B18D00B44D63 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -361,13 +293,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		21A089FB2F93B18D00B44D63 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -375,11 +300,6 @@
 			isa = PBXTargetDependency;
 			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
 			targetProxy = 2139DC362F92E69B00ECF1D1 /* PBXContainerItemProxy */;
-		};
-		21A08A082F93B18D00B44D63 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = 21A089FE2F93B18D00B44D63 /* TempBro */;
-			targetProxy = 21A08A072F93B18D00B44D63 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -738,74 +658,6 @@
 			};
 			name = Release;
 		};
-		21A08A0A2F93B18D00B44D63 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = TempBro/TempBro.entitlements;
-				CODE_SIGN_IDENTITY = "Apple Development";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 44P2L32FL4;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = TempBro/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TempBro;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-					"@executable_path/../../../../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 26.3;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.TempBro;
-				PRODUCT_NAME = "$(inherited)";
-				REGISTER_APP_GROUPS = YES;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Debug;
-		};
-		21A08A0B2F93B18D00B44D63 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = TempBro/TempBro.entitlements;
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = 44P2L32FL4;
-				ENABLE_APP_SANDBOX = YES;
-				ENABLE_HARDENED_RUNTIME = YES;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = TempBro/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = TempBro;
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/../Frameworks",
-					"@executable_path/../../../../Frameworks",
-				);
-				MACOSX_DEPLOYMENT_TARGET = 26.3;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.TempBro;
-				PRODUCT_NAME = "$(inherited)";
-				REGISTER_APP_GROUPS = YES;
-				SDKROOT = macosx;
-				SKIP_INSTALL = YES;
-				STRING_CATALOG_GENERATE_SYMBOLS = YES;
-				SWIFT_APPROACHABLE_CONCURRENCY = YES;
-				SWIFT_EMIT_LOC_STRINGS = YES;
-				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
-				SWIFT_VERSION = 5.0;
-			};
-			name = Release;
-		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -841,15 +693,6 @@
 			buildConfigurations = (
 				215482DF2F9143AA00163538 /* Debug */,
 				215482E02F9143AA00163538 /* Release */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = Release;
-		};
-		21A08A0D2F93B18D00B44D63 /* Build configuration list for PBXNativeTarget "TempBro" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				21A08A0A2F93B18D00B44D63 /* Debug */,
-				21A08A0B2F93B18D00B44D63 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
