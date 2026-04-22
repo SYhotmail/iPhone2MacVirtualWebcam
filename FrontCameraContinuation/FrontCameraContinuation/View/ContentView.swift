@@ -6,7 +6,7 @@ struct ContentView: View {
     @AppStorage("host") private var host = "192.168.1.10"
     @AppStorage("port") private var port = "9999"
     @State private var streamSize: StreamSize = .full
-    @State private var isPreviewVisible = true
+    @State private var isPreviewVisible = false
     @FocusState private var focusedField: Field?
 
     private enum Field {
