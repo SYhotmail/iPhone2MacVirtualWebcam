@@ -29,11 +29,15 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var currentPosition: AVCaptureDevice.Position = .front
     private var currentStreamSize: StreamSize = .full
     
+    private var startedToGenerate = false
+    
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
 
     func preparePreview(position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) {
         currentPosition = position
-        currentStreamSize = StreamSize.allCases.first(where: { $0.sessionPreset == preset }) ?? currentStreamSize
+        if let found = StreamSize.allCases.first(where: { $0.sessionPreset == preset }) {
+            currentStreamSize = found
+        }
         try? setupCamera(position: position, preset: preset)
     }
 
@@ -56,6 +60,9 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         connection?.cancel()
         connection = nil
         isConnectedPublisher.value = false
+        
+        endOrientationUpdates()
+        
     }
 
     // MARK: - TCP
@@ -170,21 +177,43 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     private func beginOrientationUpdates() {
-        NotificationCenter.default.removeObserver(self, name: UIDevice.orientationDidChangeNotification, object: nil)
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
-        NotificationCenter.default.addObserver(
+        let name = UIDevice.orientationDidChangeNotification
+        let notificationCenter = removeNotificationCenterObserver(name)
+        
+        notificationCenter.addObserver(
             self,
             selector: #selector(deviceOrientationDidChange),
-            name: UIDevice.orientationDidChangeNotification,
+            name: name,
             object: nil
         )
+        
+        guard !startedToGenerate else {
+            return
+        }
+        
+        if !UIDevice.current.isGeneratingDeviceOrientationNotifications {
+            UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+            startedToGenerate = UIDevice.current.isGeneratingDeviceOrientationNotifications
+        }
+    }
+    
+    private func endOrientationUpdates() {
+        let name = UIDevice.orientationDidChangeNotification
+        removeNotificationCenterObserver(name)
+        
+        guard startedToGenerate else {
+            return
+        }
+        if UIDevice.current.isGeneratingDeviceOrientationNotifications {
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+            startedToGenerate = UIDevice.current.isGeneratingDeviceOrientationNotifications
+        }
     }
 
     private func beginSessionInterruptionUpdates() {
-        let notificationCenter = NotificationCenter.default
-        notificationCenter.removeObserver(self, name: AVCaptureSession.wasInterruptedNotification, object: session)
-        notificationCenter.removeObserver(self, name: AVCaptureSession.interruptionEndedNotification, object: session)
-        notificationCenter.removeObserver(self, name: AVCaptureSession.runtimeErrorNotification, object: session)
+        let notificationCenter = removeNotificationCenterObserver(AVCaptureSession.wasInterruptedNotification, object: session)
+        removeNotificationCenterObserver(AVCaptureSession.interruptionEndedNotification, object: session)
+        removeNotificationCenterObserver(AVCaptureSession.runtimeErrorNotification, object: session)
 
         notificationCenter.addObserver(
             self,
@@ -209,14 +238,21 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     private func beginAppActivationUpdates() {
-        let notificationCenter = NotificationCenter.default
-        notificationCenter.removeObserver(self, name: UIApplication.didBecomeActiveNotification, object: nil)
+        let name = UIApplication.didBecomeActiveNotification
+        let notificationCenter = removeNotificationCenterObserver(name)
         notificationCenter.addObserver(
             self,
             selector: #selector(appDidBecomeActive),
-            name: UIApplication.didBecomeActiveNotification,
+            name: name,
             object: nil
         )
+    }
+    
+    @discardableResult
+    private func removeNotificationCenterObserver(_ name: NSNotification.Name, object: Any? = nil) -> NotificationCenter {
+        let notificationCenter = NotificationCenter.default
+        notificationCenter.removeObserver(self, name: name, object: object)
+        return notificationCenter
     }
 
     @objc private func sessionWasInterrupted(_ notification: Notification) {
@@ -305,7 +341,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private func setupEncoder(width: Int32, height: Int32) {
         invalidateEncoder()
 
-        VTCompressionSessionCreate(
+        let res = VTCompressionSessionCreate(
             allocator: nil,
             width: width,
             height: height,
@@ -317,24 +353,29 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             refcon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
             compressionSessionOut: &compressionSession
         )
+        
+        guard res == noErr, let compressionSession else {
+            return
+        }
 
-        VTSessionSetProperty(compressionSession!,
+        VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_RealTime,
                              value: kCFBooleanTrue)
 
-        VTSessionSetProperty(compressionSession!,
+        VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_AllowFrameReordering,
                              value: kCFBooleanFalse)
 
-        VTSessionSetProperty(compressionSession!,
+        VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
                              value: 30 as CFTypeRef)
 
-        VTSessionSetProperty(compressionSession!,
+        VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_ProfileLevel,
                              value: kVTProfileLevel_H264_Baseline_AutoLevel)
 
-        VTCompressionSessionPrepareToEncodeFrames(compressionSession!)
+        VTCompressionSessionPrepareToEncodeFrames(compressionSession)
+        
         encodedWidth = width
         encodedHeight = height
         sentConfig = false
