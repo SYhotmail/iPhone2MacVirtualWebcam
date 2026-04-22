@@ -31,6 +31,12 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
 
+    func preparePreview(position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) {
+        currentPosition = position
+        currentStreamSize = StreamSize.allCases.first(where: { $0.sessionPreset == preset }) ?? currentStreamSize
+        try? setupCamera(position: position, preset: preset)
+    }
+
     func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, streamSize: StreamSize) {
         currentHost = host
         currentPort = port
@@ -46,9 +52,10 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     
     func stopStreaming() {
         shouldAutoResume = false
-        NotificationCenter.default.removeObserver(self)
-        UIDevice.current.endGeneratingDeviceOrientationNotifications()
-        stopCaptureAndConnection()
+        invalidateEncoder()
+        connection?.cancel()
+        connection = nil
+        isConnectedPublisher.value = false
     }
 
     // MARK: - TCP
