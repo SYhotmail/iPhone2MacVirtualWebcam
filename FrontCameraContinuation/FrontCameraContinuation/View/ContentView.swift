@@ -2,11 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @StateObject private var manager = StreamManager()
-    @AppStorage("host") private var host = "192.168.1.10"
-    @AppStorage("port") private var port = "9999"
-    @State private var streamSize: StreamSize = .full
-    @State private var isPreviewVisible = false
+    @State private var viewModel = ContentViewModel()
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -26,7 +22,7 @@ struct ContentView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
                     headerSection
-                    if isPreviewVisible {
+                    if viewModel.isPreviewVisible {
                         previewSection
                             .transition(.slide.combined(with: .opacity))
                     } else {
@@ -39,16 +35,9 @@ struct ContentView: View {
                 .padding(.bottom, 28)
             }
         }
-        .animation(.spring(response: 0.38, dampingFraction: 0.88), value: isPreviewVisible)
-        .onAppear {
-            manager.preparePreview(streamSize: streamSize)
-        }
+        .animation(.spring(response: 0.38, dampingFraction: 0.88), value: viewModel.isPreviewVisible)
         .onTapGesture {
             focusedField = nil
-        }
-        .onChange(of: streamSize) {
-            guard !manager.isStreaming else { return }
-            manager.preparePreview(streamSize: streamSize)
         }
     }
 
@@ -62,40 +51,86 @@ struct ContentView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 6) {
+            VStack {
+                HStack(alignment: .top) {
                     Text("Send Camera to Mac")
-                        .font(.system(size: 32, weight: .bold, design: .rounded))
+                        .font(.title)
+                        .fontWeight(.bold)
+                        .fontDesign(.rounded)
                         .foregroundStyle(primaryTextColor)
-
-                    Text("Frame your shot on iPhone, then send the front camera feed straight to your Mac in one tap.")
-                        .font(.subheadline)
-                        .foregroundStyle(secondaryTextColor)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity)
+                    
+                    Spacer()
+                    
+                    
+                    statusBadge
                 }
-
-                Spacer()
-
-                statusBadge
+                
+                Text("Frame your shot on iPhone, then send the front camera feed straight to your Mac in one tap.")
+                    .font(.subheadline)
+                    .foregroundStyle(secondaryTextColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            HStack(spacing: 10) {
-                featureChip(title: "Front Camera", systemImage: "camera.fill")
-                featureChip(title: streamSize.title, systemImage: "dial.medium")
-                /*featureChip(title: isPreviewVisible ? "Preview On" : "Preview Off", systemImage: isPreviewVisible ? "eye.fill" : "eye.slash.fill") */
+            HStack(alignment: .top, spacing: 10) {
+                VStack(alignment: .leading, spacing: 10) {
+                    #if os(iOS)
+                    featureChip(title: "Camera", systemImage: "camera.fill")
+                    #endif
+                    
+                    Picker("Camera", systemImage: "camera.fill", selection: $viewModel.cameraPosition.animation()) {
+                        ForEach(viewModel.supportedCameraPositions()) { size in
+                            Text(size.title)
+                                .font(.footnote)
+                                .fontWeight(.semibold)
+                                .tag(size)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(primaryTextColor)
+                    .background(fieldBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(fieldBorderColor, lineWidth: 1)
+                    }
+                    .disabled(viewModel.isStreaming)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .leading, spacing: 10) {
+#if os(iOS)
+featureChip(title: "Video Resolution", systemImage: "viewfinder")
+#endif
+                    Picker("Video Resolution", systemImage: "viewfinder", selection: $viewModel.streamSize.animation()) {
+                        ForEach(viewModel.supportedCameraStreamSizes()) { size in
+                            Text(size.title)
+                                .font(.footnote)
+                                .fontWeight(.semibold)
+                                .tag(size)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .tint(primaryTextColor)
+                    .background(fieldBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .stroke(fieldBorderColor, lineWidth: 1)
+                    }
+                    .disabled(viewModel.isStreaming)
+                }
+                
             }
         }
     }
 
     private var previewSection: some View {
         ZStack(alignment: .bottomLeading) {
-            CameraPreviewView(session: manager.previewSession)
+            CameraPreviewView(session: viewModel.previewSession)
                 .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
                 .overlay(alignment: .topTrailing) {
                     HStack(spacing: 10) {
                         Button {
-                            isPreviewVisible.toggle()
+                            viewModel.togglePreviewVisibility()
                         } label: {
                             Image(systemName: "arrow.up.left.and.arrow.down.right")
                                 .font(.subheadline.weight(.bold))
@@ -105,15 +140,15 @@ struct ContentView: View {
                         }
                         .accessibilityLabel("Hide preview")
 
-                        Text(manager.isStreaming ? "LIVE" : "READY")
+                        Text(viewModel.isStreaming ? "LIVE" : "READY")
                             .font(.caption.weight(.bold))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
                             .padding(.vertical, 7)
-                            .background(manager.isStreaming ? Color.red : Color.black.opacity(0.55), in: Capsule())
+                            .background(viewModel.isStreaming ? Color.red : Color.black.opacity(0.55), in: Capsule())
                     }
                     .onTapGesture {
-                        isPreviewVisible.toggle()
+                        viewModel.togglePreviewVisibility()
                     }
                     .padding(16)
                 }
@@ -135,7 +170,7 @@ struct ContentView: View {
                 Text("Preview")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(.white)
-                Text(manager.isStreaming ? "Sending the front camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac.")
+                Text(viewModel.isStreaming ? "Sending the front camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac.")
                     .font(.subheadline)
                     .foregroundStyle(.white.opacity(0.82))
                     .fixedSize(horizontal: false, vertical: true)
@@ -153,7 +188,7 @@ struct ContentView: View {
                     title: "Mac Address",
                     systemImage: "desktopcomputer",
                     prompt: "192.168.1.10",
-                    text: $host
+                    text: $viewModel.host
                 )
                 .focused($focusedField, equals: .host)
                 .textContentType(.URL)
@@ -166,41 +201,18 @@ struct ContentView: View {
                     title: "Port",
                     systemImage: "network",
                     prompt: "9999",
-                    text: $port
+                    text: $viewModel.port
                 )
                 .focused($focusedField, equals: .port)
                 .keyboardType(.numberPad)
                 .submitLabel(.done)
-
-                VStack(alignment: .leading, spacing: 10) {
-                    Label("Video Resolution", systemImage: "viewfinder")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(secondaryTextColor)
-
-                    Picker("Video Resolution", selection: $streamSize) {
-                        ForEach(manager.supportedCameraSessionPresets()) { size in
-                            Text(size.title).tag(size)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                    .tint(primaryTextColor)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(fieldBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 18, style: .continuous)
-                            .stroke(fieldBorderColor, lineWidth: 1)
-                    }
-                    .disabled(manager.isStreaming)
-                }
             }
 
             Button(action: toggleStreaming) {
                 HStack(spacing: 10) {
-                    Image(systemName: manager.isStreaming ? "stop.fill" : "bolt.fill")
+                    Image(systemName: viewModel.isStreaming ? "stop.fill" : "bolt.fill")
                         .font(.headline)
-                    Text(manager.isStreaming ? "Stop Stream" : "Start Stream")
+                    Text(viewModel.isStreaming ? "Stop Stream" : "Start Stream")
                         .font(.headline.weight(.semibold))
                 }
                 .foregroundStyle(.white)
@@ -208,7 +220,7 @@ struct ContentView: View {
                 .padding(.vertical, 18)
                 .background(
                     LinearGradient(
-                        colors: manager.isStreaming
+                        colors: viewModel.isStreaming
                             ? palette.stopActionColors
                             : palette.startActionColors,
                         startPoint: .leading,
@@ -235,9 +247,9 @@ struct ContentView: View {
     private var statusBadge: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(manager.isStreaming ? Color.green : Color.yellow)
+                .fill(viewModel.isStreaming ? Color.green : Color.yellow)
                 .frame(width: 10, height: 10)
-            Text(manager.isStreaming ? "Connected" : "Standby")
+            Text(viewModel.isStreaming ? "Connected" : "Standby")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(primaryTextColor)
         }
@@ -246,13 +258,13 @@ struct ContentView: View {
         .background(cardBackgroundColor, in: Capsule())
     }
 
-    private func featureChip(title: String, systemImage: String) -> some View {
+    private func featureChip(title: String,
+                             font: Font = .footnote,
+                             systemImage: String) -> some View {
         Label(title, systemImage: systemImage)
-            .font(.footnote.weight(.semibold))
+            .font(font)
+            .fontWeight(.semibold)
             .foregroundStyle(primaryTextColor)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(cardBackgroundColor, in: Capsule())
     }
 
     private func settingField(title: String, systemImage: String, prompt: String, text: Binding<String>) -> some View {
@@ -279,7 +291,7 @@ struct ContentView: View {
             Spacer()
 
             Button {
-                isPreviewVisible.toggle()
+                viewModel.togglePreviewVisibility()
             } label: {
                 Label("Show Preview", systemImage: "arrow.down.right.and.arrow.up.left")
                     .font(.subheadline.weight(.semibold))
@@ -322,15 +334,7 @@ struct ContentView: View {
     private func toggleStreaming() {
         focusedField = nil
 
-        if manager.isStreaming {
-            manager.stopStreaming()
-        } else {
-            manager.startStreaming(
-                host: host.trimmingCharacters(in: .whitespacesAndNewlines),
-                port: UInt16(port) ?? 9999,
-                streamSize: streamSize
-            )
-        }
+        viewModel.toggleStreaming()
     }
 }
 
