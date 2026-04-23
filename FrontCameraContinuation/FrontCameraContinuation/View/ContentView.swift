@@ -127,31 +127,6 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
         ZStack(alignment: .bottomLeading) {
             CameraPreviewView(session: viewModel.previewSession)
                 .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .overlay(alignment: .topTrailing) {
-                    HStack(spacing: 10) {
-                        Button {
-                            viewModel.togglePreviewVisibility()
-                        } label: {
-                            Image(systemName: "arrow.up.left.and.arrow.down.right")
-                                .font(.subheadline.weight(.bold))
-                                .foregroundStyle(.white)
-                                .frame(width: 38, height: 38)
-                                .background(.black.opacity(0.42), in: Circle())
-                        }
-                        .accessibilityLabel("Hide preview")
-
-                        Text(viewModel.isStreaming ? "LIVE" : "READY")
-                            .font(.caption.weight(.bold))
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 7)
-                            .background(viewModel.isStreaming ? Color.red : Color.black.opacity(0.55), in: Capsule())
-                    }
-                    .onTapGesture {
-                        viewModel.togglePreviewVisibility()
-                    }
-                    .padding(16)
-                }
                 .overlay {
                     RoundedRectangle(cornerRadius: 30, style: .continuous)
                         .stroke(.white.opacity(0.22), lineWidth: 1)
@@ -165,6 +140,7 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
                 endPoint: .bottom
             )
             .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
+            .allowsHitTesting(false)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Preview")
@@ -176,6 +152,33 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(20)
+
+            VStack {
+                HStack(spacing: 10) {
+                    Spacer()
+
+                    Button {
+                        viewModel.togglePreviewVisibility()
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(.black.opacity(0.42), in: Circle())
+                    }
+                    .accessibilityLabel("Hide preview")
+
+                    Text(viewModel.isStreaming ? "LIVE" : "READY")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(viewModel.isStreaming ? Color.red : Color.black.opacity(0.55), in: Capsule())
+                }
+
+                Spacer()
+            }
+            .padding(16)
         }
         .frame(maxWidth: .infinity)
         .frame(height: 360)
