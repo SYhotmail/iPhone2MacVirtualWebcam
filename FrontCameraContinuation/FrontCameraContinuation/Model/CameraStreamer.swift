@@ -16,7 +16,14 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     let session = AVCaptureSession()
     private var compressionSession: VTCompressionSession?
-    private var connection: NWConnection?
+    private var connection: NWConnection? {
+        didSet {
+            guard let oldValue, oldValue !== connection else {
+                return
+            }
+            oldValue.cancel()
+        }
+    }
     private var videoOutput: AVCaptureVideoDataOutput?
     private let captureQueue = DispatchQueue(label: "camera")
     private var sentConfig = false
@@ -28,6 +35,14 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     private var currentPort: UInt16?
     private var currentPosition: AVCaptureDevice.Position = .front
     private var currentPreset: AVCaptureSession.Preset = .high
+    private var sessionChangeWorkItem: DispatchWorkItem! {
+        didSet {
+            guard let oldValue, !oldValue.isCancelled, oldValue !== sessionChangeWorkItem else {
+                return
+            }
+            oldValue.cancel()
+        }
+    }
     
     private var startedToGenerate = false
     
@@ -55,7 +70,6 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     func stopStreaming() {
         shouldAutoResume = false
         invalidateEncoder()
-        connection?.cancel()
         connection = nil
         isConnectedPublisher.value = false
         
@@ -71,7 +85,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             return false
         }
 
-        connection?.cancel()
+        connection = nil
         
         let endpoint = NWEndpoint.Host(host)
         let connection = NWConnection(host: endpoint, port: p, using: .tcp)
@@ -123,9 +137,11 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     // MARK: - Camera
     
     private func configureSession(preset: AVCaptureSession.Preset,
-                                  inBatch: Bool = true,
+                                  inBatch: Bool,
                                   position: AVCaptureDevice.Position? = nil) throws {
+        // debugPrint("!!! \(#function) inBatch \(inBatch) position \(position, default: "no position")")
         if inBatch {
+            sessionChangeWorkItem = nil
             session.beginConfiguration()
         }
         
@@ -154,15 +170,22 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             session.commitConfiguration()
         }
         
-        
         beginOrientationUpdates()
         beginSessionInterruptionUpdates()
         beginAppActivationUpdates()
         
-        DispatchQueue.global(qos: .default).async { [weak session] in
-            guard let session, inBatch || !session.isRunning else { return }
+        scheduleSessionStart()
+    }
+    
+    private func scheduleSessionStart() {
+        sessionChangeWorkItem = .init(flags: .inheritQoS) { [weak session] in
+            guard let session, !session.isRunning else { return }
+#if !targetEnvironment(simulator)
             session.startRunning()
+#endif
         }
+        
+        DispatchQueue.global(qos: .default).async(execute: sessionChangeWorkItem)
     }
 
     private func setupCamera(position: AVCaptureDevice.Position,
@@ -171,10 +194,12 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         let hasInputWithSamePosition = session.inputs
             .compactMap { $0 as? AVCaptureDeviceInput }
             .contains { $0.device.position == position }
-
+        
+        let noInputWithSamePosition = !hasInputWithSamePosition
+        
         try configureSession(preset: preset,
-                             inBatch: !hasInputWithSamePosition,
-                             position: hasInputWithSamePosition ? nil : position)
+                             inBatch: noInputWithSamePosition,
+                             position: noInputWithSamePosition ? position : nil)
     }
 
     private func applySessionPreset(_ preset: AVCaptureSession.Preset) {
@@ -271,7 +296,6 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         guard shouldAutoResume else { return }
         invalidateEncoder()
-        connection?.cancel()
         connection = nil
     }
 
@@ -304,15 +328,18 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         invalidateEncoder()
         setupConnection(host: host, port: port)
     
-        try? configureSession(preset: currentPreset)
+        try? setupCamera(position: currentPosition,
+                         preset: currentPreset)
     }
 
     private func stopCaptureAndConnection() {
-        DispatchQueue.global(qos: .default).async { [weak session] in
-            session?.stopRunning()
+        sessionChangeWorkItem = .init(flags: .enforceQoS) { [weak session] in
+            guard let session, session.isRunning else { return }
+            session.stopRunning()
         }
+        DispatchQueue.global(qos: .default).async(execute: sessionChangeWorkItem)
+        
         invalidateEncoder()
-        connection?.cancel()
         connection = nil
     }
 
