@@ -34,8 +34,6 @@ In other words:
 
 ## Screenshots
 
-![Overview](docs/images/setup-overview.jpeg)
-
 ![iPhone and Mac apps](docs/images/iphone-mac-preview.jpeg)
 
 ## Requirements
