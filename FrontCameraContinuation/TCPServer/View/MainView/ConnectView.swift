@@ -22,7 +22,6 @@ struct ConnectView: View {
             let availableHeight = max(proxy.size.height - (ConnectViewLayout.outerPadding * 2), ConnectViewLayout.minimumWindowSize.height)
             let sidebarWidth = ConnectViewLayout.sidebarWidth(for: availableWidth)
             let previewHeight = ConnectViewLayout.previewHeight(for: availableHeight)
-            let fitsWithoutScrolling = ConnectViewLayout.fitsWithoutScrolling(for: proxy.size)
 
             ZStack {
                 LinearGradient(
@@ -44,14 +43,9 @@ struct ConnectView: View {
                     .blur(radius: ConnectViewLayout.accentOrbBlur)
                     .offset(ConnectViewLayout.accentOrbOffset)
 
-                if fitsWithoutScrolling {
+                ScrollView(showsIndicators: false) {
                     content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
                         .padding(ConnectViewLayout.outerPadding)
-                } else {
-                    ScrollView(showsIndicators: false) {
-                        content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
-                            .padding(ConnectViewLayout.outerPadding)
-                    }
                 }
             }
         }
@@ -82,11 +76,12 @@ struct ConnectView: View {
         HStack(alignment: .top, spacing: ConnectViewLayout.headerSpacing) {
             VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
                 Text("Remote Camera Receiver")
-                    .font(.system(size: 28, weight: .bold, design: .rounded))
+                    .font(.title.weight(.bold))
+                    .fontDesign(.rounded)
                     .foregroundStyle(palette.primaryText)
 
-                Text("Receive your iPhone camera feed, preview it live on your Mac, and publish it as a virtual camera for Zoom, Meet, and QuickTime.")
-                    .font(.headline.weight(.medium))
+                Text("Start the Mac receiver, then preview and publish the iPhone feed as a virtual camera.")
+                    .font(.subheadline.weight(.medium))
                     .foregroundStyle(palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -120,17 +115,17 @@ struct ConnectView: View {
 
     private var controlCard: some View {
         VStack(alignment: .leading, spacing: ConnectViewLayout.headerSpacing) {
-            Text("Controls")
+            Text("Receiver")
                 .font(.title2.weight(.bold))
                 .foregroundStyle(palette.primaryText)
 
             VStack(alignment: .leading, spacing: ConnectViewLayout.actionSpacing) {
-                Text("1. Start the Mac receiver")
+                Text("Start Listening")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(palette.primaryText)
 
-                Text("Keep the receiver running before you open the iPhone app. The listener uses port \(viewModel.listenPort) by default.")
-                    .font(.subheadline)
+                Text("Keep the receiver running before you open the iPhone app on port \(viewModel.listenPort).")
+                    .font(.footnote)
                     .foregroundStyle(palette.secondaryText)
 
                 actionButton(
@@ -146,12 +141,12 @@ struct ConnectView: View {
                 .overlay(palette.panelBorder)
 
             VStack(alignment: .leading, spacing: ConnectViewLayout.actionSpacing) {
-                Text("2. Prepare the virtual camera")
+                Text("Virtual Camera")
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(palette.primaryText)
 
-                Text("Install the system extension after moving the app to `/Applications`. You can remove it again later from the same screen.")
-                    .font(.subheadline)
+                Text("Install or remove the camera extension from here.")
+                    .font(.footnote)
                     .foregroundStyle(palette.secondaryText)
 
                 HStack(spacing: ConnectViewLayout.actionSpacing) {
@@ -190,8 +185,8 @@ struct ConnectView: View {
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: ConnectViewLayout.contentSpacing) {
-            Text("Status")
-                .font(.title2.weight(.bold))
+            Text("Connection Status")
+                .font(.headline.weight(.bold))
                 .foregroundStyle(palette.primaryText)
 
             LazyVGrid(columns: [
@@ -240,11 +235,11 @@ struct ConnectView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Live Preview")
-                        .font(.title2.weight(.bold))
+                        .font(.headline.weight(.bold))
                         .foregroundStyle(palette.primaryText)
 
                     Text(viewModel.previewSubtitle)
-                        .font(.subheadline)
+                        .font(.footnote)
                         .foregroundStyle(palette.secondaryText)
                 }
 
@@ -267,17 +262,17 @@ struct ConnectView: View {
                 if !viewModel.connectionReady {
                     VStack(spacing: ConnectViewLayout.emptyStateSpacing) {
                         Image(systemName: viewModel.isRunning ? "iphone.gen3.radiowaves.left.and.right" : "play.square.stack")
-                            .font(.system(size: 42, weight: .medium))
+                            .font(.largeTitle.weight(.medium))
                             .foregroundStyle(.white.opacity(0.88))
 
                         Text(viewModel.isRunning ? "Waiting for iPhone stream" : "Start the receiver to begin")
-                            .font(.title3.weight(.semibold))
+                            .font(.headline.weight(.semibold))
                             .foregroundStyle(.white)
 
                         Text(viewModel.isRunning
                              ? "Open the iPhone app and send video to \(viewModel.primaryAddressForConnection):\(viewModel.listenPort)."
                              : "Turn on the receiver first, then connect from the iPhone app using the same Wi-Fi network.")
-                            .font(.subheadline)
+                            .font(.footnote)
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.white.opacity(0.8))
                             .frame(maxWidth: ConnectViewLayout.previewTextMaxWidth)
@@ -305,11 +300,11 @@ struct ConnectView: View {
     private var overallStatusCard: some View {
         VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
             Label(viewModel.overallStatusTitle, systemImage: viewModel.overallStatusIcon)
-                .font(.headline.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(palette.primaryText)
 
             Text(viewModel.overallStatusMessage)
-                .font(.subheadline)
+                .font(.footnote)
                 .foregroundStyle(palette.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -340,7 +335,7 @@ struct ConnectView: View {
             }
 
             Text("\(viewModel.primaryAddressForConnection):\(viewModel.listenPort)")
-                .font(.system(.title3, design: .monospaced).weight(.semibold))
+                .font(.system(.headline, design: .monospaced).weight(.semibold))
                 .foregroundStyle(palette.primaryText)
 
             Text("Use this LAN address in the iPhone app. If you have multiple interfaces, pick the one shared with the phone.")
@@ -386,7 +381,7 @@ struct ConnectView: View {
 
     private func infoPill(title: String, systemImage: String, accent: Color) -> some View {
         Label(title, systemImage: systemImage)
-            .font(.footnote.weight(.semibold))
+            .font(.caption.weight(.semibold))
             .foregroundStyle(palette.primaryText)
             .padding(.horizontal, ConnectViewLayout.badgeHorizontalPadding)
             .padding(.vertical, ConnectViewLayout.badgeVerticalPadding)
@@ -403,18 +398,18 @@ struct ConnectView: View {
                               gradient: [Color],
                               action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Label(title, systemImage: systemImage)
-                    .font(.headline.weight(.semibold))
+                    .font(.subheadline.weight(.semibold))
 
                 Text(subtitle)
-                    .font(.subheadline)
+                    .font(.footnote)
                     .foregroundStyle(.white.opacity(0.82))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(16)
+            .padding(14)
             .background(
                 LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing),
                 in: RoundedRectangle(cornerRadius: ConnectViewLayout.controlCornerRadius, style: .continuous)
@@ -428,10 +423,10 @@ struct ConnectView: View {
                                        action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: systemImage)
-                .font(.subheadline.weight(.semibold))
+                .font(.footnote.weight(.semibold))
                 .foregroundStyle(palette.primaryText)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .padding(.vertical, 10)
                 .background(palette.secondaryPanelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.infoBannerCornerRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: ConnectViewLayout.infoBannerCornerRadius, style: .continuous)
@@ -445,13 +440,13 @@ struct ConnectView: View {
                             value: String,
                             systemImage: String,
                             tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Label(title, systemImage: systemImage)
-                .font(.footnote.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(palette.secondaryText)
 
             Text(value)
-                .font(.headline.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(palette.primaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
