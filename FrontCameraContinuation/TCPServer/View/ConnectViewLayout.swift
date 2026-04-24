@@ -3,13 +3,13 @@ import CoreGraphics
 enum ConnectViewLayout {
     static let minimumWindowSize = CGSize(width: 920, height: 620)
 
-    static let outerPadding: CGFloat = 24
-    static let sectionSpacing: CGFloat = 20
-    static let cardPadding: CGFloat = 22
-    static let compactCardPadding: CGFloat = 18
-    static let inputPadding: CGFloat = 16
+    static let outerPadding: CGFloat = 20
+    static let sectionSpacing: CGFloat = 16
+    static let cardPadding: CGFloat = 18
+    static let compactCardPadding: CGFloat = 16
+    static let inputPadding: CGFloat = 14
     static let badgeHorizontalPadding: CGFloat = 12
-    static let badgeVerticalPadding: CGFloat = 8
+    static let badgeVerticalPadding: CGFloat = 7
     static let checklistBadgeSize: CGFloat = 30
 
     static let headerCornerRadius: CGFloat = 32
@@ -20,12 +20,12 @@ enum ConnectViewLayout {
     static let previewCornerRadius: CGFloat = 28
     static let infoBannerCornerRadius: CGFloat = 18
 
-    static let headerSpacing: CGFloat = 18
-    static let columnSpacing: CGFloat = 20
-    static let contentSpacing: CGFloat = 16
-    static let textStackSpacing: CGFloat = 10
-    static let actionSpacing: CGFloat = 12
-    static let emptyStateSpacing: CGFloat = 14
+    static let headerSpacing: CGFloat = 16
+    static let columnSpacing: CGFloat = 16
+    static let contentSpacing: CGFloat = 14
+    static let textStackSpacing: CGFloat = 8
+    static let actionSpacing: CGFloat = 10
+    static let emptyStateSpacing: CGFloat = 12
 
     static let heroOrbSize: CGFloat = 380
     static let heroOrbBlur: CGFloat = 36
@@ -39,15 +39,16 @@ enum ConnectViewLayout {
     static let sidebarMinWidth: CGFloat = 360
     static let sidebarMaxWidth: CGFloat = 400
     static let previewMinWidth: CGFloat = 460
-    static let previewMinHeight: CGFloat = 520
-    static let previewMaxHeight: CGFloat = 560
-    static let metricCardMinHeight: CGFloat = 122
+    static let previewMinHeight: CGFloat = 430
+    static let previewMaxHeight: CGFloat = 500
+    static let metricCardMinHeight: CGFloat = 104
     static let previewTextMaxWidth: CGFloat = 420
     static let statusCapsuleWidth: CGFloat = 42
     static let statusCapsuleHeight: CGFloat = 6
+    static let noScrollThresholdHeight: CGFloat = 620
 
     private static let sidebarWidthRatio: CGFloat = 0.38
-    private static let previewHeightRatio: CGFloat = 0.56
+    private static let previewHeightRatio: CGFloat = 0.50
 
     static func sidebarWidth(for availableWidth: CGFloat) -> CGFloat {
         let proposed = availableWidth * sidebarWidthRatio
@@ -57,5 +58,9 @@ enum ConnectViewLayout {
     static func previewHeight(for availableHeight: CGFloat) -> CGFloat {
         let proposed = availableHeight * previewHeightRatio
         return min(max(proposed, previewMinHeight), previewMaxHeight)
+    }
+
+    static func fitsWithoutScrolling(for size: CGSize) -> Bool {
+        size.height >= noScrollThresholdHeight && size.width >= minimumWindowSize.width
     }
 }

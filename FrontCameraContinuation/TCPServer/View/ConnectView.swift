@@ -22,6 +22,7 @@ struct ConnectView: View {
             let availableHeight = max(proxy.size.height - (ConnectViewLayout.outerPadding * 2), ConnectViewLayout.minimumWindowSize.height)
             let sidebarWidth = ConnectViewLayout.sidebarWidth(for: availableWidth)
             let previewHeight = ConnectViewLayout.previewHeight(for: availableHeight)
+            let fitsWithoutScrolling = ConnectViewLayout.fitsWithoutScrolling(for: proxy.size)
 
             ZStack {
                 LinearGradient(
@@ -43,22 +44,14 @@ struct ConnectView: View {
                     .blur(radius: ConnectViewLayout.accentOrbBlur)
                     .offset(ConnectViewLayout.accentOrbOffset)
 
-                ScrollView(showsIndicators: false) {
-                    VStack(spacing: ConnectViewLayout.sectionSpacing) {
-                        headerCard
-
-                        HStack(alignment: .top, spacing: ConnectViewLayout.columnSpacing) {
-                            VStack(spacing: ConnectViewLayout.sectionSpacing) {
-                                controlCard
-                                statusCard
-                            }
-                            .frame(width: sidebarWidth)
-
-                            previewCard(height: previewHeight)
-                                .frame(minWidth: ConnectViewLayout.previewMinWidth)
-                        }
+                if fitsWithoutScrolling {
+                    content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
+                        .padding(ConnectViewLayout.outerPadding)
+                } else {
+                    ScrollView(showsIndicators: false) {
+                        content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
+                            .padding(ConnectViewLayout.outerPadding)
                     }
-                    .padding(ConnectViewLayout.outerPadding)
                 }
             }
         }
@@ -68,15 +61,32 @@ struct ConnectView: View {
         .frame(minWidth: ConnectViewLayout.minimumWindowSize.width, minHeight: ConnectViewLayout.minimumWindowSize.height)
     }
 
+    private func content(sidebarWidth: CGFloat, previewHeight: CGFloat) -> some View {
+        VStack(spacing: ConnectViewLayout.sectionSpacing) {
+            headerCard
+
+            HStack(alignment: .top, spacing: ConnectViewLayout.columnSpacing) {
+                VStack(spacing: ConnectViewLayout.sectionSpacing) {
+                    controlCard
+                    statusCard
+                }
+                .frame(width: sidebarWidth)
+
+                previewCard(height: previewHeight)
+                    .frame(minWidth: ConnectViewLayout.previewMinWidth)
+            }
+        }
+    }
+
     private var headerCard: some View {
         HStack(alignment: .top, spacing: ConnectViewLayout.headerSpacing) {
             VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
                 Text("Remote Camera Receiver")
-                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .font(.system(size: 28, weight: .bold, design: .rounded))
                     .foregroundStyle(palette.primaryText)
 
                 Text("Receive your iPhone camera feed, preview it live on your Mac, and publish it as a virtual camera for Zoom, Meet, and QuickTime.")
-                    .font(.title3.weight(.medium))
+                    .font(.headline.weight(.medium))
                     .foregroundStyle(palette.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
 
@@ -404,7 +414,7 @@ struct ConnectView: View {
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(18)
+            .padding(16)
             .background(
                 LinearGradient(colors: gradient, startPoint: .leading, endPoint: .trailing),
                 in: RoundedRectangle(cornerRadius: ConnectViewLayout.controlCornerRadius, style: .continuous)
@@ -421,7 +431,7 @@ struct ConnectView: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(palette.primaryText)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
+                .padding(.vertical, 12)
                 .background(palette.secondaryPanelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.infoBannerCornerRadius, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: ConnectViewLayout.infoBannerCornerRadius, style: .continuous)

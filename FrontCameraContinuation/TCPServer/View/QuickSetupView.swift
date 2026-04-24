@@ -6,9 +6,67 @@ struct QuickSetupView: View {
     private var palette: ConnectViewPalette {
         ConnectViewPalette(colorScheme: colorScheme)
     }
+    
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: palette.backgroundGradient,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    
+    private var bodyCore: some View {
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: ConnectViewLayout.sectionSpacing) {
+                VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
+                    Text("Quick Setup")
+                        .font(.system(size: 30, weight: .bold, design: .rounded))
+                        .foregroundStyle(palette.primaryText)
+
+                    Text("Use this guide when you need a reminder. The main receiver window stays focused on starting the stream and monitoring the feed.")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(palette.secondaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                VStack(alignment: .leading, spacing: ConnectViewLayout.contentSpacing) {
+                    checklistRow(
+                        number: "1",
+                        title: "Move the app to Applications",
+                        detail: "System extension installation is most reliable when the host app runs from `/Applications`."
+                    )
+
+                    checklistRow(
+                        number: "2",
+                        title: "Install the virtual camera",
+                        detail: "Use the install button in the receiver window, then approve any macOS permission prompt."
+                    )
+
+                    checklistRow(
+                        number: "3",
+                        title: "Start the receiver",
+                        detail: "Launch the listener on your Mac before you start streaming from the iPhone."
+                    )
+
+                    checklistRow(
+                        number: "4",
+                        title: "Connect from iPhone",
+                        detail: "Enter the Mac IP address and port shown in the receiver window, then tap Start Stream on the phone."
+                    )
+
+                    checklistRow(
+                        number: "5",
+                        title: "Pick the virtual camera in apps",
+                        detail: "Choose `Remote Camera` in Zoom, Meet, QuickTime, or another macOS camera app."
+                    )
+                }
+            }
+            .padding(ConnectViewLayout.outerPadding)
+        }
+    }
 
     var body: some View {
-        ZStack {
+        /*ZStack {
             LinearGradient(
                 colors: palette.backgroundGradient,
                 startPoint: .topLeading,
@@ -16,55 +74,14 @@ struct QuickSetupView: View {
             )
             .ignoresSafeArea()
 
-            ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: ConnectViewLayout.sectionSpacing) {
-                    VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
-                        Text("Quick Setup")
-                            .font(.system(size: 30, weight: .bold, design: .rounded))
-                            .foregroundStyle(palette.primaryText)
-
-                        Text("Use this guide when you need a reminder. The main receiver window stays focused on starting the stream and monitoring the feed.")
-                            .font(.title3.weight(.medium))
-                            .foregroundStyle(palette.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    VStack(alignment: .leading, spacing: ConnectViewLayout.contentSpacing) {
-                        checklistRow(
-                            number: "1",
-                            title: "Move the app to Applications",
-                            detail: "System extension installation is most reliable when the host app runs from `/Applications`."
-                        )
-
-                        checklistRow(
-                            number: "2",
-                            title: "Install the virtual camera",
-                            detail: "Use the install button in the receiver window, then approve any macOS permission prompt."
-                        )
-
-                        checklistRow(
-                            number: "3",
-                            title: "Start the receiver",
-                            detail: "Launch the listener on your Mac before you start streaming from the iPhone."
-                        )
-
-                        checklistRow(
-                            number: "4",
-                            title: "Connect from iPhone",
-                            detail: "Enter the Mac IP address and port shown in the receiver window, then tap Start Stream on the phone."
-                        )
-
-                        checklistRow(
-                            number: "5",
-                            title: "Pick the virtual camera in apps",
-                            detail: "Choose `Remote Camera` in Zoom, Meet, QuickTime, or another macOS camera app."
-                        )
-                    }
-                }
-                .padding(ConnectViewLayout.outerPadding)
-            }
+            
+        }*/
+        
+        bodyCore.background {
+            backgroundGradient.frame(maxWidth: .infinity,
+                                     maxHeight: .infinity)
+            .ignoresSafeArea()
         }
-        //.frame(minWidth: 560, minHeight: 420)
     }
 
     private func checklistRow(number: String, title: String, detail: String) -> some View {
