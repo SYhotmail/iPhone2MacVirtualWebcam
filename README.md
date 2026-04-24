@@ -13,7 +13,7 @@ The project contains:
 1. Run `TCPServer` on your Mac.
 2. Install and activate the virtual camera from the Mac app.
 3. Run `FrontCameraContinuation` on your iPhone.
-4. Enter your Mac's LAN IP address and port in the iPhone app.
+4. Use the LAN IP address and port shown in the Mac app, then enter them in the iPhone app.
 5. Start streaming from the iPhone.
 6. Select the virtual camera(Remote Camera) in Zoom, Meet, QuickTime, or another camera app on macOS.
 
@@ -140,6 +140,7 @@ When first launched on iPhone, allow camera access.
 The Mac app shows:
 
 - the live decoded preview
+- the Mac LAN IP address and port to use from the iPhone app
 - listener status
 - connection status
 - virtual camera installation status
@@ -148,14 +149,15 @@ The Mac app shows:
 ### On the iPhone
 
 1. Open `FrontCameraContinuation`
-2. Enter the Mac's LAN IP address in the `Mac Address` field
-3. Enter the port
-4. Choose the video resolution
-5. Tap `Start Stream`
+2. Look at `TCPServer.app` and copy the Mac LAN IP address it shows
+3. Enter that address in the `Mac Address` field
+4. Enter the port shown in the Mac app, which is `9999` by default
+5. Choose the video resolution
+6. Tap `Start Stream`
 
 The iPhone app includes a local preview so you can frame the shot before or during streaming.
 
-## Finding the Mac LAN IP Address
+## Mac LAN IP Reminder
 
 The `Mac Address` field in the iPhone UI expects the Mac's IP address on your local network, for example:
 
@@ -165,7 +167,9 @@ The `Mac Address` field in the iPhone UI expects the Mac's IP address on your lo
 
 It does **not** mean the hardware MAC address.
 
-Ways to find the Mac IP address:
+In the current flow, `TCPServer.app` detects and displays the Mac LAN IP for you. You usually do not need to look it up manually.
+
+If you ever need to verify it yourself, you can still find it here:
 
 - `System Settings` -> `Wi-Fi` -> connected network -> inspect the IP address
 - Terminal:
@@ -204,9 +208,10 @@ Use this order for the smoothest setup:
 2. Click `Start`
 3. Install the virtual camera if needed
 4. Launch the iPhone app
-5. Enter the Mac LAN IP and port `9999`
-6. Tap `Start Stream`
-7. Select the virtual camera in Zoom or another app
+5. Read the Mac LAN IP and port from `TCPServer.app`
+6. Enter that address and port in the iPhone app
+7. Tap `Start Stream`
+8. Select the virtual camera in Zoom or another app
 
 ## Troubleshooting
 
