@@ -11,6 +11,7 @@ final class ConnectViewModel {
     let installer: VirtualCameraInstaller
 
     private(set) var isRunning = false
+    private(set) var isPreviewVisible = false
     private(set) var listenerStatus = "Stopped"
     private(set) var connectionStatus = "Waiting for Listener"
     private(set) var networkAddresses = LocalNetworkAddressProvider.ipv4Addresses()
@@ -59,6 +60,10 @@ final class ConnectViewModel {
     }
 
     var previewSubtitle: String {
+        if !isPreviewVisible {
+            return "Show the preview when you want to verify framing or confirm the incoming feed."
+        }
+
         if connectionReady {
             return "The decoded feed below is what the virtual camera is receiving right now."
         }
@@ -132,6 +137,18 @@ final class ConnectViewModel {
 
     func refreshNetworkAddresses() {
         networkAddresses = LocalNetworkAddressProvider.ipv4Addresses()
+    }
+
+    func showPreview() {
+        isPreviewVisible = true
+    }
+
+    func hidePreview() {
+        isPreviewVisible = false
+    }
+
+    func togglePreview() {
+        isPreviewVisible.toggle()
     }
 
     func toggleServer() {

@@ -41,10 +41,12 @@ enum ConnectViewLayout {
     static let previewMinWidth: CGFloat = 460
     static let previewMinHeight: CGFloat = 400
     static let previewMaxHeight: CGFloat = 470
-    static let metricCardMinHeight: CGFloat = 90
+    static let collapsedPreviewMinWidth: CGFloat = 280
+    static let collapsedPreviewHeight: CGFloat = 188
+    static let statusItemMinHeight: CGFloat = 58
     static let previewTextMaxWidth: CGFloat = 420
-    static let statusCapsuleWidth: CGFloat = 42
-    static let statusCapsuleHeight: CGFloat = 6
+    static let statusDotSize: CGFloat = 8
+    static let previewToggleButtonSize: CGFloat = 28
     private static let sidebarWidthRatio: CGFloat = 0.38
     private static let previewHeightRatio: CGFloat = 0.46
 

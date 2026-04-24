@@ -2,6 +2,7 @@ import Foundation
 import Darwin
 
 enum LocalNetworkAddressProvider {
+    nonisolated
     static func ipv4Addresses() -> [String] {
         var addresses = [String]()
         var pointer: UnsafeMutablePointer<ifaddrs>?

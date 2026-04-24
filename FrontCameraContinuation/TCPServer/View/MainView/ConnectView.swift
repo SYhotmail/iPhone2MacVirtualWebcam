@@ -16,21 +16,24 @@ struct ConnectView: View {
         ConnectViewPalette(colorScheme: colorScheme)
     }
     
+    private var backgroundGradient: some View {
+        LinearGradient(
+            colors: palette.backgroundGradient,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+    
     var body: some View {
         GeometryReader { proxy in
             let availableWidth = max(proxy.size.width - (ConnectViewLayout.outerPadding * 2), ConnectViewLayout.minimumWindowSize.width)
             let availableHeight = max(proxy.size.height - (ConnectViewLayout.outerPadding * 2), ConnectViewLayout.minimumWindowSize.height)
             let sidebarWidth = ConnectViewLayout.sidebarWidth(for: availableWidth)
             let previewHeight = ConnectViewLayout.previewHeight(for: availableHeight)
-
-            ZStack {
-                LinearGradient(
-                    colors: palette.backgroundGradient,
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-
+            
+            ZStack(alignment: .top) {
+                backgroundGradient
+                    .ignoresSafeArea()
                 Circle()
                     .fill(.white.opacity(colorScheme == .dark ? 0.08 : 0.26))
                     .frame(width: ConnectViewLayout.heroOrbSize, height: ConnectViewLayout.heroOrbSize)
@@ -43,16 +46,17 @@ struct ConnectView: View {
                     .blur(radius: ConnectViewLayout.accentOrbBlur)
                     .offset(ConnectViewLayout.accentOrbOffset)
 
-                ScrollView(showsIndicators: false) {
-                    content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
-                        .padding(ConnectViewLayout.outerPadding)
-                }
+                content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
+                    .padding(ConnectViewLayout.outerPadding)
             }
         }
-        .onAppear {
-            viewModel.refreshNetworkAddresses()
+        .task {
+            viewModel.refreshNetworkAddresses() // TODO: move to background...
         }
-        .frame(minWidth: ConnectViewLayout.minimumWindowSize.width, minHeight: ConnectViewLayout.minimumWindowSize.height)
+        .frame(minWidth: ConnectViewLayout.minimumWindowSize.width,
+               minHeight: ConnectViewLayout.minimumWindowSize.height)
+        .frame(maxWidth: .infinity,
+               maxHeight: .infinity)
     }
 
     private func content(sidebarWidth: CGFloat, previewHeight: CGFloat) -> some View {
@@ -62,12 +66,29 @@ struct ConnectView: View {
             HStack(alignment: .top, spacing: ConnectViewLayout.columnSpacing) {
                 VStack(spacing: ConnectViewLayout.sectionSpacing) {
                     controlCard
-                    statusCard
+                    if viewModel.isPreviewVisible {
+                        statusCard
+                    }
                 }
                 .frame(width: sidebarWidth)
 
-                previewCard(height: previewHeight)
-                    .frame(minWidth: ConnectViewLayout.previewMinWidth)
+                rightColumn(previewHeight: previewHeight)
+                    .frame(minWidth: viewModel.isPreviewVisible ? ConnectViewLayout.previewMinWidth : ConnectViewLayout.collapsedPreviewMinWidth)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func rightColumn(previewHeight: CGFloat) -> some View {
+        if viewModel.isPreviewVisible {
+            previewCard(height: previewHeight)
+        } else {
+            VStack(spacing: ConnectViewLayout.sectionSpacing) {
+                collapsedPreviewCard
+                statusCard
+                    .frame(maxWidth: .infinity)
+                    .layoutPriority(1)
+                    .transition(.opacity)
             }
         }
     }
@@ -102,8 +123,11 @@ struct ConnectView: View {
 
             Spacer(minLength: 20)
 
-            overallStatusCard
-                .frame(width: ConnectViewLayout.statusCardWidth)
+            HStack(spacing: ConnectViewLayout.actionSpacing) {
+                previewVisibilityButton
+                overallStatusCard
+                    .frame(width: ConnectViewLayout.statusCardWidth)
+            }
         }
         .padding(ConnectViewLayout.outerPadding)
         .background(palette.panelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.headerCornerRadius, style: .continuous))
@@ -185,36 +209,44 @@ struct ConnectView: View {
 
     private var statusCard: some View {
         VStack(alignment: .leading, spacing: ConnectViewLayout.contentSpacing) {
-            Text("Connection Status")
-                .font(.headline.weight(.bold))
-                .foregroundStyle(palette.primaryText)
+            HStack {
+                Text("Connection Status")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(palette.primaryText)
+
+                Spacer()
+
+                Text(viewModel.connectionReady ? "Live" : "Standby")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(viewModel.connectionReady ? palette.successColor : palette.secondaryText)
+            }
 
             LazyVGrid(columns: [
                 GridItem(.flexible(), spacing: ConnectViewLayout.actionSpacing),
                 GridItem(.flexible(), spacing: ConnectViewLayout.actionSpacing)
             ], spacing: ConnectViewLayout.actionSpacing) {
-                metricCard(
+                statusItem(
                     title: "Listener",
                     value: viewModel.listenerStatus,
                     systemImage: "dot.radiowaves.left.and.right",
                     tint: listenerTint
                 )
 
-                metricCard(
+                statusItem(
                     title: "Connection",
                     value: viewModel.connectionStatus,
                     systemImage: "cable.connector",
                     tint: connectionTint
                 )
 
-                metricCard(
+                statusItem(
                     title: "Virtual Camera",
                     value: viewModel.installer.status,
                     systemImage: "camera.badge.ellipsis",
                     tint: installerTint
                 )
 
-                metricCard(
+                statusItem(
                     title: "Stream",
                     value: viewModel.streamSummary,
                     systemImage: "video.badge.waveform",
@@ -245,11 +277,17 @@ struct ConnectView: View {
 
                 Spacer()
 
-                infoPill(
-                    title: viewModel.connectionReady ? "Receiving Feed" : "Awaiting Stream",
-                    systemImage: viewModel.connectionReady ? "dot.circle.and.hand.point.up.left.fill" : "hourglass",
-                    accent: viewModel.connectionReady ? palette.successColor : palette.cautionColor
-                )
+                HStack(spacing: ConnectViewLayout.actionSpacing) {
+                    infoPill(
+                        title: viewModel.connectionReady ? "Receiving Feed" : "Awaiting Stream",
+                        systemImage: viewModel.connectionReady ? "dot.circle.and.hand.point.up.left.fill" : "hourglass",
+                        accent: viewModel.connectionReady ? palette.successColor : palette.cautionColor
+                    )
+
+                    iconActionButton(systemImage: "eye.slash", title: "Hide Preview") {
+                        viewModel.hidePreview()
+                    }
+                }
             }
 
             ZStack {
@@ -290,6 +328,51 @@ struct ConnectView: View {
         }
         .padding(ConnectViewLayout.cardPadding)
         .frame(maxWidth: .infinity)
+        .background(palette.panelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.cardCornerRadius, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: ConnectViewLayout.cardCornerRadius, style: .continuous)
+                .stroke(palette.panelBorder, lineWidth: 1)
+        }
+    }
+
+    private var collapsedPreviewCard: some View {
+        VStack(alignment: .leading, spacing: ConnectViewLayout.contentSpacing) {
+            HStack {
+                Text("Preview Hidden")
+                    .font(.headline.weight(.bold))
+                    .foregroundStyle(palette.primaryText)
+
+                Spacer()
+
+                iconActionButton(systemImage: "eye", title: "Show Preview") {
+                    viewModel.showPreview()
+                }
+            }
+
+            Text("Use this compact mode to keep the main controls and connection status visible. Open the preview only when you need to verify the incoming image.")
+                .font(.footnote)
+                .foregroundStyle(palette.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                viewModel.showPreview()
+            } label: {
+                Label("Show Preview", systemImage: "play.rectangle.on.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(palette.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .padding(.horizontal, 12)
+                    .background(palette.secondaryPanelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.infoBannerCornerRadius, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: ConnectViewLayout.infoBannerCornerRadius, style: .continuous)
+                            .stroke(palette.panelBorder, lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(ConnectViewLayout.cardPadding)
+        .frame(maxWidth: .infinity, minHeight: ConnectViewLayout.collapsedPreviewHeight, alignment: .topLeading)
         .background(palette.panelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.cardCornerRadius, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: ConnectViewLayout.cardCornerRadius, style: .continuous)
@@ -367,6 +450,15 @@ struct ConnectView: View {
         return Color.red.opacity(0.8)
     }
 
+    private var previewVisibilityButton: some View {
+        iconActionButton(
+            systemImage: viewModel.isPreviewVisible ? "eye.slash" : "eye",
+            title: viewModel.isPreviewVisible ? "Hide Preview" : "Show Preview"
+        ) {
+            viewModel.togglePreview()
+        }
+    }
+
     private var listenerTint: Color {
         listenerReady ? palette.successColor : palette.cautionColor
     }
@@ -436,26 +528,55 @@ struct ConnectView: View {
         .buttonStyle(.plain)
     }
 
-    private func metricCard(title: String,
+    private func iconActionButton(systemImage: String,
+                                  title: String,
+                                  action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(palette.primaryText)
+                .frame(width: ConnectViewLayout.previewToggleButtonSize, height: ConnectViewLayout.previewToggleButtonSize)
+                .background(palette.secondaryPanelBackground, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(palette.panelBorder, lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .help(title)
+    }
+
+    private func statusItem(title: String,
                             value: String,
                             systemImage: String,
                             tint: Color) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label(title, systemImage: systemImage)
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: systemImage)
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(palette.secondaryText)
+                .frame(width: 16)
 
-            Text(value)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(palette.primaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(palette.secondaryText)
 
-            Capsule()
+                Text(value)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.primaryText)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 6)
+
+            Circle()
                 .fill(tint)
-                .frame(width: ConnectViewLayout.statusCapsuleWidth, height: ConnectViewLayout.statusCapsuleHeight)
+                .frame(width: ConnectViewLayout.statusDotSize, height: ConnectViewLayout.statusDotSize)
         }
-        .frame(maxWidth: .infinity, minHeight: ConnectViewLayout.metricCardMinHeight, alignment: .topLeading)
-        .padding(ConnectViewLayout.inputPadding)
+        .frame(maxWidth: .infinity, minHeight: ConnectViewLayout.statusItemMinHeight, alignment: .leading)
+        .padding(.horizontal, ConnectViewLayout.inputPadding)
+        .padding(.vertical, 10)
         .background(palette.secondaryPanelBackground, in: RoundedRectangle(cornerRadius: ConnectViewLayout.controlCornerRadius, style: .continuous))
     }
 }
