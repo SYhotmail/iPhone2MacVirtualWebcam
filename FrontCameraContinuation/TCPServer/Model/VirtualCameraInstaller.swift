@@ -39,7 +39,7 @@ final class VirtualCameraInstaller: NSObject {
             return
         }
 
-        status = "Requesting Activation"
+        status = "Requesting Deactivation"
 
         let request = OSSystemExtensionRequest.deactivationRequest(
             forExtensionWithIdentifier: VirtualCameraConfiguration.extensionBundleIdentifier,

@@ -13,5 +13,18 @@ struct TCPServerApp: App {
         WindowGroup {
             ConnectView()
         }
+        .defaultSize(width: 980, height: 640)
+        .commands {
+            QuickSetupCommands()
+        }
+
+        WindowGroup("Quick Setup", id: "quick-setup") {
+            QuickSetupView()
+        } /*{
+            Window("Quick Setup", id: "quick-setup") {
+                QuickSetupView()
+            }
+        }*/
+
     }
 }
