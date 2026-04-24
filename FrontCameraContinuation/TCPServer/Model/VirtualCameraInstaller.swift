@@ -14,7 +14,7 @@ final class VirtualCameraInstaller: NSObject {
             if openInstalledAppIfAvailable() {
                 status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
             } else {
-                status = "Run \(Self.applicationPathPrefix)/TCPServer.app to install the extension."
+                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to install the extension."
             }
             return
         }
@@ -34,12 +34,12 @@ final class VirtualCameraInstaller: NSObject {
             if openInstalledAppIfAvailable() {
                 status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
             } else {
-                status = "Run \(Self.applicationPathPrefix)/TCPServer.app to install the extension."
+                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to install the extension."
             }
             return
         }
 
-        status = "Requesting Activation"
+        status = "Requesting Deactivation"
 
         let request = OSSystemExtensionRequest.deactivationRequest(
             forExtensionWithIdentifier: VirtualCameraConfiguration.extensionBundleIdentifier,

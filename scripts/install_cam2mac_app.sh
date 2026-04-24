@@ -5,7 +5,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 PROJECT_DIR="$ROOT_DIR/FrontCameraContinuation"
 PROJECT_PATH="$PROJECT_DIR/FrontCameraContinuation.xcodeproj"
-SCHEME="${1:-TCPServer}"
+SCHEME="${1:-Cam2Mac}"
 CONFIGURATION="${CONFIGURATION:-Debug}"
 INSTALL_DIR="${APP_INSTALL_DIR:-/Applications}"
 DESTINATION_APP="${INSTALL_DIR}/${SCHEME}.app"

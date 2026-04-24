@@ -198,7 +198,7 @@ final class H264Decoder {
             infoFlagsOut: &flags
         )
         
-        guard let flags = Self.valueOnStatusSuccess(flags, status: decodeStatus) else { return }
+        guard Self.valueOnStatusSuccess(flags, status: decodeStatus) != nil else { return }
     }
 
     private let decompressionCallback: VTDecompressionOutputCallback = {

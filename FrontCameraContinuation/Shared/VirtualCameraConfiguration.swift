@@ -2,11 +2,7 @@ import CoreMedia
 
 enum VirtualCameraConfiguration {
     static let extensionBundleIdentifier = "by.sy.TCPServer.VirtualCameraExtension" // "by.sy.TCPServer.TempBro"
-    static var deviceName: String {
-        let prefix = "Remote Camera"
-        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-        return prefix // version.flatMap { prefix + "(\($0))" } ?? prefix
-    }
+    static let deviceName = "Remote Camera"
     static let manufacturerName = "FrontCameraContinuation"
     static let modelName = "Virtual Camera"
     static let streamWidth = 1920 //1280
