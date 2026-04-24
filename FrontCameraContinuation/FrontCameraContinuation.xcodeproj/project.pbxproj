@@ -37,7 +37,7 @@
 /* Begin PBXFileReference section */
 		2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = by.sy.TCPServer.VirtualCameraExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482C02F91423800163538 /* FrontCameraContinuation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FrontCameraContinuation.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		215482D62F9143A900163538 /* TCPServer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = TCPServer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		215482D62F9143A900163538 /* Cam2Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cam2Mac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -127,7 +127,7 @@
 			isa = PBXGroup;
 			children = (
 				215482C02F91423800163538 /* FrontCameraContinuation.app */,
-				215482D62F9143A900163538 /* TCPServer.app */,
+				215482D62F9143A900163538 /* Cam2Mac.app */,
 				2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */,
 			);
 			name = Products;
@@ -180,9 +180,9 @@
 			productReference = 215482C02F91423800163538 /* FrontCameraContinuation.app */;
 			productType = "com.apple.product-type.application";
 		};
-		215482D52F9143A900163538 /* TCPServer */ = {
+		215482D52F9143A900163538 /* Cam2Mac */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 215482DE2F9143AA00163538 /* Build configuration list for PBXNativeTarget "TCPServer" */;
+			buildConfigurationList = 215482DE2F9143AA00163538 /* Build configuration list for PBXNativeTarget "Cam2Mac" */;
 			buildPhases = (
 				215482D22F9143A900163538 /* Sources */,
 				215482D32F9143A900163538 /* Frameworks */,
@@ -198,11 +198,11 @@
 				215482D72F9143A900163538 /* TCPServer */,
 				A10000022F9143AA00163538 /* Shared */,
 			);
-			name = TCPServer;
+			name = Cam2Mac;
 			packageProductDependencies = (
 			);
-			productName = TCPServer;
-			productReference = 215482D62F9143A900163538 /* TCPServer.app */;
+			productName = Cam2Mac;
+			productReference = 215482D62F9143A900163538 /* Cam2Mac.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -241,7 +241,7 @@
 			projectRoot = "";
 			targets = (
 				215482BF2F91423800163538 /* FrontCameraContinuation */,
-				215482D52F9143A900163538 /* TCPServer */,
+				215482D52F9143A900163538 /* Cam2Mac */,
 				2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */,
 			);
 		};
@@ -589,7 +589,8 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "TCPServer needs camera access to discover and feed the virtual camera device.";
+				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Cam2Mac needs camera access to discover and feed the virtual camera device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use front camera as a system camera";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -599,7 +600,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.3;
 				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Cam2Mac;
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
@@ -638,7 +639,8 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "TCPServer needs camera access to discover and feed the virtual camera device.";
+				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
+				INFOPLIST_KEY_NSCameraUsageDescription = "Cam2Mac needs camera access to discover and feed the virtual camera device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use front camera as a system camera";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -648,7 +650,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.3;
 				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_NAME = Cam2Mac;
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -690,7 +692,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		215482DE2F9143AA00163538 /* Build configuration list for PBXNativeTarget "TCPServer" */ = {
+		215482DE2F9143AA00163538 /* Build configuration list for PBXNativeTarget "Cam2Mac" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				215482DF2F9143AA00163538 /* Debug */,

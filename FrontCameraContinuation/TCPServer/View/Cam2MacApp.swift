@@ -1,6 +1,6 @@
 //
-//  TCPServerApp.swift
-//  TCPServer
+//  Cam2MacApp.swift
+//  Cam2Mac
 //
 //  Created by Siarhei Yakushevich on 16/04/2026.
 //
@@ -8,7 +8,7 @@
 import SwiftUI
 
 @main
-struct TCPServerApp: App {
+struct Cam2MacApp: App {
     var body: some Scene {
         WindowGroup {
             ConnectView()

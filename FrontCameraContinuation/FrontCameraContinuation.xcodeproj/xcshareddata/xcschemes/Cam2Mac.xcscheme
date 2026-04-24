@@ -15,8 +15,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "215482D52F9143A900163538"
-               BuildableName = "TCPServer.app"
-               BlueprintName = "TCPServer"
+               BuildableName = "Cam2Mac.app"
+               BlueprintName = "Cam2Mac"
                ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -44,14 +44,14 @@
          <ExecutionAction
             ActionType = "Xcode.IDEStandardExecutionActionsCore.ExecutionActionType.ShellScriptAction">
             <ActionContent
-               title = "Install TCPServer To Applications"
-               scriptText = "set -e&#10;APP_INSTALL_DIR=&quot;$HOME/Applications&quot; &quot;${SRCROOT}/../scripts/install_tcpserver_app.sh&quot; TCPServer">
+               title = "Install Cam2Mac To Applications"
+               scriptText = "set -e&#10;APP_INSTALL_DIR=&quot;$HOME/Applications&quot; &quot;${SRCROOT}/../scripts/install_cam2mac_app.sh&quot; Cam2Mac">
                <EnvironmentBuildable>
                   <BuildableReference
                      BuildableIdentifier = "primary"
                      BlueprintIdentifier = "215482D52F9143A900163538"
-                     BuildableName = "TCPServer.app"
-                     BlueprintName = "TCPServer"
+                     BuildableName = "Cam2Mac.app"
+                     BlueprintName = "Cam2Mac"
                      ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
                   </BuildableReference>
                </EnvironmentBuildable>
@@ -63,8 +63,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "215482D52F9143A900163538"
-            BuildableName = "TCPServer.app"
-            BlueprintName = "TCPServer"
+            BuildableName = "Cam2Mac.app"
+            BlueprintName = "Cam2Mac"
             ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -80,8 +80,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "215482D52F9143A900163538"
-            BuildableName = "TCPServer.app"
-            BlueprintName = "TCPServer"
+            BuildableName = "Cam2Mac.app"
+            BlueprintName = "Cam2Mac"
             ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

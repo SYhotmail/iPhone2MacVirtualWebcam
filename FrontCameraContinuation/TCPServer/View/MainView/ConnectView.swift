@@ -1,6 +1,6 @@
 //
 //  ContentView.swift
-//  TCPServer
+//  Cam2Mac
 //
 //  Created by Siarhei Yakushevich on 16/04/2026.
 //
