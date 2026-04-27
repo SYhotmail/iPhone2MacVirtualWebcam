@@ -6,7 +6,7 @@ import SystemExtensions
 @MainActor
 @Observable
 final class VirtualCameraInstaller: NSObject {
-    private(set) var status = "Not Installed"
+    private(set)var status = "Not Installed"
     private static let applicationPathPrefix = "/Applications"
     
     func activate() {
@@ -62,8 +62,18 @@ final class VirtualCameraInstaller: NSObject {
         NSWorkspace.shared.open(installedURL)
         return true
     }
+    
+    var installerNeedsApplicationsMove: Bool {
+        status.contains(Self.applicationPathPrefix)
+    }
+    
+    var installerHealthy: Bool {
+        // status == "Installed" || status == "Installed After Restart"
+        status.hasPrefix("Installed") // TODO: use some state...
+    }
 }
 
+// MARK: - OSSystemExtensionRequestDelegate
 extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         status = "Waiting For User Approval"

@@ -69,7 +69,7 @@ final class ConnectViewModel {
     }
 
     var installerNeedsApplicationsMove: Bool {
-        installer.status.contains("/Applications")
+        installer.installerNeedsApplicationsMove
     }
 
     var installerHealthy: Bool {
