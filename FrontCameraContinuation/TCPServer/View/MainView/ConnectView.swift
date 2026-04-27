@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-internal import AVFoundation
 
 struct ConnectView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -334,6 +333,10 @@ struct ConnectView: View {
                 .stroke(palette.panelBorder, lineWidth: 1)
         }
     }
+    
+    private func showPreview() {
+        viewModel.showPreview()
+    }
 
     private var collapsedPreviewCard: some View {
         VStack(alignment: .leading, spacing: ConnectViewLayout.contentSpacing) {
@@ -345,7 +348,7 @@ struct ConnectView: View {
                 Spacer()
 
                 iconActionButton(systemImage: "eye", title: "Show Preview") {
-                    viewModel.showPreview()
+                    showPreview()
                 }
             }
 
@@ -355,7 +358,7 @@ struct ConnectView: View {
                 .fixedSize(horizontal: false, vertical: true)
 
             Button {
-                viewModel.showPreview()
+                showPreview()
             } label: {
                 Label("Show Preview", systemImage: "play.rectangle.on.rectangle")
                     .font(.subheadline.weight(.semibold))

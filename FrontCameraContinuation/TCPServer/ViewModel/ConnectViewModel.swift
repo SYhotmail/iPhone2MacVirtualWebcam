@@ -9,18 +9,31 @@ final class ConnectViewModel {
     let listenPort: UInt16
     let manager: ServerManager
     let installer: VirtualCameraInstaller
+    let ipProvider: IPAddressProvidable
 
     private(set) var isRunning = false
     private(set) var isPreviewVisible = false
     private(set) var listenerStatus = "Stopped"
     private(set) var connectionStatus = "Waiting for Listener"
-    private(set) var networkAddresses = LocalNetworkAddressProvider.ipv4Addresses()
+    private(set) var networkAddresses = [String]()
+    
+    @ObservationIgnored
+    private var networkAddressTask: Task<Void, Never>? {
+        didSet {
+            if let oldValue, !oldValue.isCancelled {
+                oldValue.cancel()
+            }
+        }
+    }
 
+    @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
 
-    init(listenPort: UInt16 = 9999,
-         manager: ServerManager,
-         installer: VirtualCameraInstaller) {
+    init(manager: ServerManager,
+         ipProvider: IPAddressProvidable = LocalNetworkAddressProvider(),
+         installer: VirtualCameraInstaller,
+         listenPort: UInt16 = 9999) {
+        self.ipProvider = ipProvider
         self.listenPort = listenPort
         self.manager = manager
         self.installer = installer
@@ -29,9 +42,10 @@ final class ConnectViewModel {
 
     convenience init(listenPort: UInt16 = 9999) {
         self.init(
-            listenPort: listenPort,
             manager: ServerManager(),
-            installer: VirtualCameraInstaller()
+            ipProvider: LocalNetworkAddressProvider(),
+            installer: VirtualCameraInstaller(),
+            listenPort: listenPort
         )
     }
 
@@ -136,7 +150,15 @@ final class ConnectViewModel {
     }
 
     func refreshNetworkAddresses() {
-        networkAddresses = LocalNetworkAddressProvider.ipv4Addresses()
+        networkAddressTask = .init{
+            let value = await ipProvider.getIPv4Addresses()
+            await MainActor.run { [weak self] in
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                self.networkAddresses = value
+            }
+        }
     }
 
     func showPreview() {
@@ -178,15 +200,25 @@ final class ConnectViewModel {
 
     private func bind() {
         manager.listenerStatusPublisher
-            .sink { [weak self] value in
-                self?.listenerStatus = value
+            .sink { [unowned self] value in
+                self.listenerStatus = value
             }
             .store(in: &cancellables)
 
         manager.connectionStateLastPublisher
-            .sink { [weak self] value in
-                self?.connectionStatus = value
+            .sink { [unowned self] value in
+                self.connectionStatus = value
             }
             .store(in: &cancellables)
+    }
+    
+    private func unbind() {
+        cancellables.removeAll()
+    }
+    
+    isolated
+    deinit {
+        networkAddressTask = nil
+        unbind()
     }
 }

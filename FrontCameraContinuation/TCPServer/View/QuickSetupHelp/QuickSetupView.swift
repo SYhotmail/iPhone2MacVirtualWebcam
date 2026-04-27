@@ -55,10 +55,10 @@ struct QuickSetupView: View {
         }
     }
 
-    private func checklistRow(number: String, title: String, detail: String) -> some View {
+    private func checklistRow(number: Int, title: String, detail: String) -> some View {
         HStack(alignment: .top,
                spacing: ConnectViewLayout.actionSpacing) {
-            Text(number)
+            Text("\(number)")
                 .font(.headline.weight(.bold))
                 .foregroundStyle(palette.primaryText)
                 .frame(width: ConnectViewLayout.checklistBadgeSize, height: ConnectViewLayout.checklistBadgeSize)
@@ -87,4 +87,5 @@ struct QuickSetupView: View {
 
 #Preview {
     QuickSetupView()
+        .frame(height: 600)
 }
