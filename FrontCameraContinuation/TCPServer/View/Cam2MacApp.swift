@@ -10,9 +10,10 @@ import SwiftUI
 @main
 struct Cam2MacApp: App {
     static let quickSetupId = "quick-setup"
+    @State private var rootVM = ConnectViewModel()
     var body: some Scene {
         WindowGroup {
-            ConnectView()
+            ConnectView(viewModel: rootVM)
         }
         .windowManagerRole(.principal)
         .defaultSize(width: 800, height: 640)
@@ -21,10 +22,10 @@ struct Cam2MacApp: App {
         }
 
         WindowGroup("Quick Setup", id: Self.quickSetupId) {
-            QuickSetupView()
+            QuickSetupView(viewModel: rootVM.provideQuickSetupViewModel())
                 .frame(minWidth: 400, maxWidth: 900, minHeight: 400)
         }
-        .defaultSize(width: 500, height: 500)
+        .defaultSize(width: 500, height: 550)
         .windowManagerRole(.associated)
         .restorationBehavior(.disabled)
         .windowLevel(.floating)

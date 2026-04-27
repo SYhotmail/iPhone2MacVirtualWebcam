@@ -9,7 +9,7 @@ import SwiftUI
 
 struct ConnectView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var viewModel = ConnectViewModel()
+    @Bindable var viewModel: ConnectViewModel
 
     private var palette: ConnectViewPalette {
         ConnectViewPalette(colorScheme: colorScheme)
@@ -585,5 +585,5 @@ struct ConnectView: View {
 }
 
 #Preview {
-    ConnectView()
+    ConnectView(viewModel: ConnectViewModel())
 }

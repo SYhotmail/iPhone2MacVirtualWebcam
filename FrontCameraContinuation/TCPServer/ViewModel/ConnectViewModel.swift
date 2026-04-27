@@ -25,6 +25,9 @@ final class ConnectViewModel {
             }
         }
     }
+    
+    @ObservationIgnored
+    private var animatedHelp = false
 
     @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
@@ -210,6 +213,17 @@ final class ConnectViewModel {
                 self.connectionStatus = value
             }
             .store(in: &cancellables)
+    }
+    
+    func provideQuickSetupViewModel() -> QuickSetupViewModel {
+        let shouldAnimate = !animatedHelp
+        let viewModel = QuickSetupViewModel(shouldAnimate: shouldAnimate)
+        if shouldAnimate {
+            viewModel.stepsShownPublisher.sink { [weak self] in
+                self?.animatedHelp = true
+            }.store(in: &cancellables)
+        }
+        return viewModel
     }
     
     private func unbind() {

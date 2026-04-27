@@ -2,8 +2,12 @@ import SwiftUI
 
 struct QuickSetupView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @State private var viewModel = QuickSetupViewModel()
+    @State private var viewModel: QuickSetupViewModel
 
+    init(viewModel: QuickSetupViewModel) {
+        self._viewModel = .init(initialValue: viewModel)
+    }
+    
     private var palette: ConnectViewPalette {
         ConnectViewPalette(colorScheme: colorScheme)
     }
@@ -35,16 +39,21 @@ struct QuickSetupView: View {
 
                 LazyVStack(alignment: .leading,
                            spacing: ConnectViewLayout.contentSpacing) {
-                    ForEach(viewModel.steps) { step in
+                    ForEach(viewModel.steps.enumerated(),
+                            id: \.offset) { tuple in
+                        let element = tuple.element
                         checklistRow(
-                            number: step.number,
-                            title: step.title,
-                            detail: step.detail
+                            number: tuple.offset + 1,
+                            title: element.title,
+                            detail: element.detail
                         )
                     }
                 }
             }
             .padding(ConnectViewLayout.outerPadding)
+            .onAppear(perform: viewModel.onAppear)
+            .onDisappear(perform: viewModel.onDissappear)
+            .animation(.bouncy(duration: 0.3, extraBounce: 0.1), value: viewModel.steps.count)
         }
     }
 
@@ -86,6 +95,6 @@ struct QuickSetupView: View {
 }
 
 #Preview {
-    QuickSetupView()
+    QuickSetupView(viewModel: QuickSetupViewModel())
         .frame(height: 600)
 }
