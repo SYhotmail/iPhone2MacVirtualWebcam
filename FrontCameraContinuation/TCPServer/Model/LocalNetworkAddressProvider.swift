@@ -25,13 +25,25 @@ struct LocalNetworkAddressProvider: IPAddressProvidable {
         await getIPAddresses(ipVersion: .ipv4).flatMap { $0.value }
     }
     
+    static func localIPv4AtStart(addresses: [String]) -> [String] {
+        guard let index = addresses.firstIndex(where: { $0.hasPrefix("192.168.") }), addresses.startIndex != index else {
+            return addresses
+        }
+        
+        var result = addresses
+        let component = result.remove(at: index)
+        result.insert(component, at: 0)
+        return result
+    }
+    
     @concurrent
     func getIPAddresses(ipVersion: IPVersionType) async -> [Int: [String]] {
         let task = Task { @concurrent in
             assert(!Thread.isMainThread)
             var dic = [Int: [String]]()
             if ipVersion.contains(.ipv4) {
-                dic[IPVersionType.ipv4.rawValue] = getIPAddresses(ipv4: true)
+                let tempArray = getIPAddresses(ipv4: true)
+                dic[IPVersionType.ipv4.rawValue] = Self.localIPv4AtStart(addresses: tempArray)
             } else if ipVersion.contains(.ipv6) {
                 dic[IPVersionType.ipv6.rawValue] = getIPAddresses(ipv4: false)
             }
@@ -82,6 +94,6 @@ struct LocalNetworkAddressProvider: IPAddressProvidable {
             }
         }
 
-        return addresses.sorted()
+        return addresses
     }
 }

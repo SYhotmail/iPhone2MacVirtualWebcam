@@ -18,6 +18,11 @@ final class ConnectViewModel {
     private(set) var networkAddresses = [String]()
     
     @ObservationIgnored
+    private lazy var pasteboard: NSPasteboard! = {
+        NSPasteboard.general
+    }()
+    
+    @ObservationIgnored
     private var networkAddressTask: Task<Void, Never>? {
         didSet {
             if let oldValue, !oldValue.isCancelled {
@@ -74,6 +79,16 @@ final class ConnectViewModel {
 
     var installerHealthy: Bool {
         installer.status == "Installed" || installer.status == "Installed After Restart"
+    }
+    
+    var receiverKeepRunningTitle: String {
+        "Keep the receiver running before you open the iPhone app on port \(listenTextPort)."
+    }
+    
+    var receiverTitle: String {
+        isRunning
+             ? "Open the iPhone app and send video to \(addressText)."
+             : "Turn on the receiver first, then connect from the iPhone app using the same Wi-Fi network."
     }
 
     var previewSubtitle: String {
@@ -153,7 +168,7 @@ final class ConnectViewModel {
     }
 
     func refreshNetworkAddresses() {
-        networkAddressTask = .init{
+        networkAddressTask = .init {
             let value = await ipProvider.getIPv4Addresses()
             await MainActor.run { [weak self] in
                 guard let self, !Task.isCancelled else {
@@ -195,10 +210,26 @@ final class ConnectViewModel {
     func uninstallCamera() {
         installer.deactivate()
     }
+    
+    var listenTextPort: String {
+        "\(Int(listenPort))"
+    }
+    
+    var listenerTopTitle: String {
+        isRunning ? "Listening on \(listenTextPort)" : "Listener stopped"
+    }
+    
+    var listenerTopSystemImage: String {
+        isRunning ? "dot.radiowaves.left.and.right" : "pause.circle"
+    }
+    
+    var addressText: String {
+        "\(primaryAddressForConnection):\(listenTextPort)"
+    }
 
     func copyConnectionAddress() {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("\(primaryAddressForConnection):\(listenPort)", forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(addressText, forType: .string)
     }
 
     private func bind() {

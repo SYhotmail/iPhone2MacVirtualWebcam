@@ -107,8 +107,8 @@ struct ConnectView: View {
 
                 HStack(spacing: ConnectViewLayout.textStackSpacing) {
                     infoPill(
-                        title: viewModel.isRunning ? "Listening on \(viewModel.listenPort)" : "Listener stopped",
-                        systemImage: viewModel.isRunning ? "dot.radiowaves.left.and.right" : "pause.circle",
+                        title: viewModel.listenerTopTitle,
+                        systemImage: viewModel.listenerTopSystemImage,
                         accent: viewModel.isRunning ? palette.successColor : palette.cautionColor
                     )
 
@@ -147,7 +147,7 @@ struct ConnectView: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(palette.primaryText)
 
-                Text("Keep the receiver running before you open the iPhone app on port \(viewModel.listenPort).")
+                Text(viewModel.receiverKeepRunningTitle)
                     .font(.footnote)
                     .foregroundStyle(palette.secondaryText)
 
@@ -306,9 +306,7 @@ struct ConnectView: View {
                             .font(.headline.weight(.semibold))
                             .foregroundStyle(.white)
 
-                        Text(viewModel.isRunning
-                             ? "Open the iPhone app and send video to \(viewModel.primaryAddressForConnection):\(viewModel.listenPort)."
-                             : "Turn on the receiver first, then connect from the iPhone app using the same Wi-Fi network.")
+                        Text(viewModel.receiverTitle)
                             .font(.footnote)
                             .multilineTextAlignment(.center)
                             .foregroundStyle(.white.opacity(0.8))
@@ -420,7 +418,7 @@ struct ConnectView: View {
                 .foregroundStyle(palette.primaryText)
             }
 
-            Text("\(viewModel.primaryAddressForConnection):\(viewModel.listenPort)")
+            Text(viewModel.addressText)
                 .font(.system(.headline, design: .monospaced).weight(.semibold))
                 .foregroundStyle(palette.primaryText)
 
