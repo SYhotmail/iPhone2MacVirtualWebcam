@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -22,11 +23,9 @@ struct ContentView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
                     headerSection
-                    if viewModel.isPreviewVisible {
+                    if viewModel.isPreviewVisible { // TODO: match geometry transition
                         previewSection
                             .transition(.slide.combined(with: .opacity))
-                    } else {
-                        collapsedPreviewButton
                     }
                     controlsSection
                 }
@@ -73,35 +72,52 @@ struct ContentView: View {
 
             HStack(alignment: .top, spacing: 10) {
                 VStack(alignment: .leading, spacing: 10) {
-                    #if os(iOS)
+#if os(iOS)
                     featureChip(title: "Camera", systemImage: "camera.fill")
-                    #endif
+#endif
                     
-                    Picker("Camera", systemImage: "camera.fill", selection: $viewModel.cameraPosition.animation()) {
-                        ForEach(viewModel.supportedCameraPositions()) { size in
-                            Text(size.title)
-                                .font(.footnote)
-                                .fontWeight(.semibold)
-                                .tag(size)
-                        }
+                    Button(viewModel.cameraPosition.title, systemImage: "arrow.triangle.2.circlepath") {
+                        viewModel.toggleCameraPosition()
                     }
-                    .pickerStyle(.menu)
+                    .padding(8)
                     .tint(primaryTextColor)
                     .background(fieldBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .overlay {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(fieldBorderColor, lineWidth: 1)
                     }
-                    .disabled(viewModel.isStreaming)
                 }
                 
-                Spacer()
+                Spacer(minLength: 0)
                 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .center, spacing: 10) {
 #if os(iOS)
-featureChip(title: "Video Resolution", systemImage: "viewfinder")
+                    featureChip(title: "Preview", systemImage: nil)
 #endif
-                    Picker("Video Resolution", systemImage: "viewfinder", selection: $viewModel.streamSize.animation()) {
+                    
+                    Button {
+                        viewModel.togglePreviewVisibility()
+                    } label: {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(primaryTextColor)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .background(cardBackgroundColor, in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(cardBorderColor, lineWidth: 1)
+                            }
+                    }
+                    
+                }
+                Spacer(minLength: 0)
+                
+                VStack(alignment: .trailing, spacing: 10) {
+#if os(iOS)
+                    featureChip(title: "Resolution", systemImage: "viewfinder")
+#endif
+                    Picker("Resolution", systemImage: "viewfinder", selection: $viewModel.streamSize.animation()) {
                         ForEach(viewModel.supportedCameraStreamSizes()) { size in
                             Text(size.title)
                                 .font(.footnote)
@@ -116,7 +132,6 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(fieldBorderColor, lineWidth: 1)
                     }
-                    .disabled(viewModel.isStreaming)
                 }
                 
             }
@@ -257,13 +272,26 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
         .background(cardBackgroundColor, in: Capsule())
     }
 
-    private func featureChip(title: String,
+    @ViewBuilder
+    private func featureChip(title: String?,
                              font: Font = .footnote,
-                             systemImage: String) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(font)
-            .fontWeight(.semibold)
-            .foregroundStyle(primaryTextColor)
+                             systemImage: String?) -> some View {
+        if let title, systemImage == nil {
+            Text(title)
+                .font(font)
+                .fontWeight(.semibold)
+                .foregroundStyle(primaryTextColor)
+        } else if let systemImage, title == nil {
+            Image(systemName: systemImage)
+                .font(font)
+                .fontWeight(.semibold)
+                .foregroundStyle(primaryTextColor)
+        } else if let title, let systemImage {
+            Label(title, systemImage: systemImage)
+                .font(font)
+                .fontWeight(.semibold)
+                .foregroundStyle(primaryTextColor)
+        }
     }
 
     private func settingField(title: String, systemImage: String, prompt: String, text: Binding<String>) -> some View {
@@ -282,27 +310,6 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
                         .stroke(fieldBorderColor, lineWidth: 1)
                 }
-        }
-    }
-
-    private var collapsedPreviewButton: some View {
-        HStack {
-            Spacer()
-
-            Button {
-                viewModel.togglePreviewVisibility()
-            } label: {
-                Label("Show Preview", systemImage: "arrow.down.right.and.arrow.up.left")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(primaryTextColor)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
-                    .background(cardBackgroundColor, in: Capsule())
-                    .overlay {
-                        Capsule()
-                            .stroke(cardBorderColor, lineWidth: 1)
-                    }
-            }
         }
     }
 

@@ -84,14 +84,6 @@ final class ContentViewModel {
     }
     
     private func preparePreview() {
-        guard !isStreaming else { return }
-        DispatchQueue.main.async { [weak self] in
-            self?.preparePreviewCore() // TODO: async main
-        }
-    }
-    
-    private func preparePreviewCore() {
-        guard !isStreaming else { return }
         cameraStreamer.preparePreview(position: cameraPosition.avPosition,
                                       preset: streamSize.sessionPreset)
     }
@@ -141,8 +133,13 @@ final class ContentViewModel {
         StreamSize.allCases.filter { cameraStreamer.session.canSetSessionPreset($0.sessionPreset) }
     }
     
-    func supportedCameraPositions() -> [CameraPosition] {
-        CameraPosition.allCases
+    func toggleCameraPosition() {
+        switch cameraPosition {
+        case .front:
+            cameraPosition = .back
+        case .back:
+            cameraPosition = .front
+        }
     }
 }
 

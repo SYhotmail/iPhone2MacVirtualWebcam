@@ -1,10 +1,11 @@
 @preconcurrency import AVFoundation
 import Combine
 import UIKit
+import OSLog
 
 final class CaptureSessionManager {
     let session = AVCaptureSession()
-
+    
     var onSessionInterrupted: ((AVCaptureSession.InterruptionReason?) -> Void)?
     var onSessionInterruptionEnded: (() -> Void)?
     var onSessionRuntimeError: ((Error?) -> Void)?
@@ -13,7 +14,6 @@ final class CaptureSessionManager {
     private var videoOutput: AVCaptureVideoDataOutput?
     private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
     private var currentPosition: AVCaptureDevice.Position = .front
-    private var currentPreset: AVCaptureSession.Preset = .high
     private var sessionChangeWorkItem: DispatchWorkItem? {
         didSet {
             guard let oldValue, !oldValue.isCancelled, oldValue !== sessionChangeWorkItem else {
@@ -22,6 +22,7 @@ final class CaptureSessionManager {
             oldValue.cancel()
         }
     }
+    
     private var notificationCancellables = Set<AnyCancellable>(minimumCapacity: 3)
     private var orientationCancellable: AnyCancellable? {
         didSet {
@@ -31,9 +32,12 @@ final class CaptureSessionManager {
             oldValue.cancel()
         }
     }
-
-    init() {
+    
+    private let logger: Logger?
+    
+    init(logger: Logger? = { Bundle.main.bundleIdentifier.flatMap { .init(subsystem: $0, category: "capture.session.manager") } }()) {
         captureQueue = .init(label: "camera.session.manager", qos: .userInitiated)
+        self.logger = logger
     }
 
     private func setSampleBufferDelegate(_ delegate: AVCaptureVideoDataOutputSampleBufferDelegate) {
@@ -42,21 +46,26 @@ final class CaptureSessionManager {
 
     func configure(position: AVCaptureDevice.Position,
                    preset: AVCaptureSession.Preset,
-                   delegate: AVCaptureVideoDataOutputSampleBufferDelegate) throws {
+                   delegate: AVCaptureVideoDataOutputSampleBufferDelegate,
+                   startRunning start: Bool = true) throws {
         currentPosition = position
-        currentPreset = preset
 
         let hasInputWithSamePosition = session.inputs
             .compactMap { $0 as? AVCaptureDeviceInput }
             .contains { $0.device.position == position }
-
+        
+        let canSetPreset = session.canSetSessionPreset(preset) && session.sessionPreset != preset
+        
         let requiresInputRebuild = !hasInputWithSamePosition
-        if requiresInputRebuild {
+        let changeConfiguration = requiresInputRebuild || canSetPreset
+        if changeConfiguration {
             sessionChangeWorkItem = nil
             session.beginConfiguration()
         }
 
-        applySessionPreset(preset)
+        if canSetPreset {
+            session.sessionPreset = preset
+        }
 
         if requiresInputRebuild {
             do {
@@ -72,28 +81,31 @@ final class CaptureSessionManager {
 
         configureVideoConnection()
 
-        if requiresInputRebuild {
+        if changeConfiguration {
             session.commitConfiguration()
         }
         
-        beginSessionNotifications()
-        beginOrientationUpdates()
-        scheduleSessionStart()
+        if start {
+            startRunning()
+        }
     }
 
     func reconfigureCurrent(delegate: AVCaptureVideoDataOutputSampleBufferDelegate) throws {
-        try configure(position: currentPosition, preset: currentPreset, delegate: delegate)
+        try configure(position: currentPosition,
+                      preset: session.sessionPreset,
+                      delegate: delegate)
+    }
+    
+    private func startRunning() {
+        beginSessionNotifications()
+        beginOrientationUpdates()
+        scheduleChangeSession(shouldRun: true)
     }
 
     func stopRunning() {
-        sessionChangeWorkItem = .init(flags: .enforceQoS) { [weak session] in
-            guard let session, session.isRunning else { return }
-            session.stopRunning()
-        }
-        guard let sessionChangeWorkItem else {
-            return
-        }
-        DispatchQueue.global(qos: .default).async(execute: sessionChangeWorkItem)
+        orientationCancellable = nil
+        notificationCancellables.removeAll(keepingCapacity: true)
+        scheduleChangeSession(shouldRun: false)
     }
 
     private func rebuildGraph(for position: AVCaptureDevice.Position,
@@ -123,29 +135,27 @@ final class CaptureSessionManager {
         configureRotationCoordinator(for: device)
     }
 
-    private func applySessionPreset(_ preset: AVCaptureSession.Preset) {
-        guard session.sessionPreset != preset, session.canSetSessionPreset(preset) else { return }
-        session.sessionPreset = preset
-    }
-
-    private func scheduleSessionStart() {
-        sessionChangeWorkItem = .init(flags: .inheritQoS) { [weak session] in
-            guard let session, !session.isRunning else { return }
+    private func scheduleChangeSession(shouldRun: Bool) {
+        let sessionChangeWorkItem = DispatchWorkItem(flags: .inheritQoS) { [weak session] in
+            guard let session else { return }
 #if !targetEnvironment(simulator)
-            session.startRunning()
+            if shouldRun {
+                if !session.isRunning {
+                    session.startRunning()
+                }
+            } else if session.isRunning {
+                session.stopRunning()
+            }
 #endif
         }
-
-        guard let sessionChangeWorkItem else {
-            return
-        }
-        DispatchQueue.global(qos: .default).async(execute: sessionChangeWorkItem)
+        self.sessionChangeWorkItem = sessionChangeWorkItem
+        DispatchQueue.global(qos: .userInitiated).async(execute: sessionChangeWorkItem)
     }
 
     private func configureVideoConnection() {
         guard let videoConnection = videoOutput?.connection(with: .video) else { return }
 
-        if videoConnection.isVideoMirroringSupported {
+        if videoConnection.isVideoMirroringSupported, !videoConnection.isVideoMirrored {
             videoConnection.isVideoMirrored = true
         }
 
@@ -153,38 +163,31 @@ final class CaptureSessionManager {
     }
 
     private func beginOrientationUpdates() {
-        guard let rotationCoordinator else {
-            return
-        }
-
-        
-        orientationCancellable = rotationCoordinator.publisher(for: \.videoRotationAngleForHorizonLevelCapture)
+        orientationCancellable = rotationCoordinator?.publisher(for: \.videoRotationAngleForHorizonLevelCapture)
             .sink { [weak self] _ in
                 self?.updateVideoConnectionRotation()
             }
-
-
-        updateVideoConnectionRotation()
+        if rotationCoordinator != nil {
+            updateVideoConnectionRotation()
+        }
     }
 
     private func beginSessionNotifications() {
         let notificationCenter = NotificationCenter.default
         notificationCancellables.removeAll(keepingCapacity: true)
-
+        
         notificationCenter.publisher(for: AVCaptureSession.wasInterruptedNotification, object: session)
             .sink { [weak self] notification in
-                let reason: AVCaptureSession.InterruptionReason?
-                if let rawReason = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int {
-                    reason = AVCaptureSession.InterruptionReason(rawValue: rawReason)
-                } else {
-                    reason = nil
-                }
+                let rawReason = notification.userInfo?[AVCaptureSessionInterruptionReasonKey] as? Int
+                let reason = rawReason.flatMap { AVCaptureSession.InterruptionReason(rawValue: $0) }
+                self?.logger?.debug("Session was interupped \(reason?.rawValue ?? -1)")
                 self?.onSessionInterrupted?(reason)
             }
             .store(in: &notificationCancellables)
 
         notificationCenter.publisher(for: AVCaptureSession.interruptionEndedNotification, object: session)
             .sink { [weak self] _ in
+                self?.logger?.debug("Session interruptioned ended")
                 self?.onSessionInterruptionEnded?()
             }
             .store(in: &notificationCancellables)
@@ -192,6 +195,7 @@ final class CaptureSessionManager {
         notificationCenter.publisher(for: AVCaptureSession.runtimeErrorNotification, object: session)
             .sink { [weak self] notification in
                 let error = notification.userInfo?[AVCaptureSessionErrorKey] as? Error
+                self?.logger?.debug("Session runtime error error \(error?.localizedDescription ?? "")")
                 self?.onSessionRuntimeError?(error)
             }
             .store(in: &notificationCancellables)
@@ -213,7 +217,7 @@ final class CaptureSessionManager {
     private func applyRotationAngle(to videoConnection: AVCaptureConnection) {
         guard let rotationCoordinator else { return }
         let angle = rotationCoordinator.videoRotationAngleForHorizonLevelCapture
-        guard videoConnection.isVideoRotationAngleSupported(angle) else { return }
+        guard videoConnection.isVideoRotationAngleSupported(angle), videoConnection.videoRotationAngle != angle else { return }
         videoConnection.videoRotationAngle = angle
     }
 }

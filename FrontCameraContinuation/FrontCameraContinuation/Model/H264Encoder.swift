@@ -12,6 +12,7 @@ final class H264Encoder {
     private var frameIndex = 0
     private var encodedWidth: Int32 = 0
     private var encodedHeight: Int32 = 0
+    static let maxKeyInterval = 30
     var outputHandler: OutputHandler!
 
 
@@ -21,7 +22,7 @@ final class H264Encoder {
 
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
         frameIndex += 1
-        let shouldForceKeyframe = frameIndex % 30 == 0
+        let shouldForceKeyframe = frameIndex % Self.maxKeyInterval == 0
         let frameProperties: CFDictionary? = shouldForceKeyframe
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
             : nil
@@ -86,7 +87,7 @@ final class H264Encoder {
                              value: kCFBooleanFalse)
         VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
-                             value: 30 as CFTypeRef)
+                             value: Self.maxKeyInterval as CFTypeRef)
         VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_ProfileLevel,
                              value: kVTProfileLevel_H264_Baseline_AutoLevel)
@@ -107,11 +108,16 @@ final class H264Encoder {
 
         let encoder = Unmanaged<H264Encoder>.fromOpaque(refCon).takeUnretainedValue()
 
-        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true).flatMap { $0 as NSArray }
-        let dict = attachments?.firstObject as? NSDictionary
-        let notSync = dict?[kCMSampleAttachmentKey_NotSync] as? Bool
-        let isKeyframe = notSync != true
-        if isKeyframe || !encoder.sentConfig {
+        var shouldSentConfig = !encoder.sentConfig
+        if !shouldSentConfig {
+            let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true).flatMap { $0 as NSArray }
+            let dict = attachments?.firstObject as? NSDictionary
+            let notSync = dict?[kCMSampleAttachmentKey_NotSync] as? Bool
+            let isKeyframe = notSync != true
+            shouldSentConfig = isKeyframe
+        }
+        
+        if shouldSentConfig {
             encoder.sendParameterSets(from: sampleBuffer)
             encoder.sentConfig = true
         }
@@ -120,39 +126,40 @@ final class H264Encoder {
     }
 
     private func sendParameterSets(from sampleBuffer: CMSampleBuffer) {
-        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
+        guard let outputHandler, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
 
         var spsPointer: UnsafePointer<UInt8>?
         var spsSize = 0
         var spsCount = 0
+        
+        var res = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                    formatDesc,
+                    parameterSetIndex: 0,
+                    parameterSetPointerOut: &spsPointer,
+                    parameterSetSizeOut: &spsSize,
+                    parameterSetCountOut: &spsCount,
+                    nalUnitHeaderLengthOut: nil
+        )
+        guard let spsPointer, res == noErr else {
+            return
+        }
+        outputHandler(annexBPacket(bytes: spsPointer, count: spsSize))
 
         var ppsPointer: UnsafePointer<UInt8>?
         var ppsSize = 0
         var ppsCount = 0
 
-        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-            formatDesc,
-            parameterSetIndex: 0,
-            parameterSetPointerOut: &spsPointer,
-            parameterSetSizeOut: &spsSize,
-            parameterSetCountOut: &spsCount,
-            nalUnitHeaderLengthOut: nil
+        res = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
+                formatDesc,
+                parameterSetIndex: 1,
+                parameterSetPointerOut: &ppsPointer,
+                parameterSetSizeOut: &ppsSize,
+                parameterSetCountOut: &ppsCount,
+                nalUnitHeaderLengthOut: nil
         )
-
-        CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-            formatDesc,
-            parameterSetIndex: 1,
-            parameterSetPointerOut: &ppsPointer,
-            parameterSetSizeOut: &ppsSize,
-            parameterSetCountOut: &ppsCount,
-            nalUnitHeaderLengthOut: nil
-        )
-
-        guard let spsPointer, let ppsPointer, let outputHandler else {
+        guard let ppsPointer, res == noErr else {
             return
         }
-
-        outputHandler(annexBPacket(bytes: spsPointer, count: spsSize))
         outputHandler(annexBPacket(bytes: ppsPointer, count: ppsSize))
     }
 

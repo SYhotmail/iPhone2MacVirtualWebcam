@@ -18,7 +18,7 @@ extension StreamSize: Identifiable {
     var title: String {
         switch self {
         case .full:
-            return "Default (High Quality)"
+            return "Default (HQ)"
         case .hd1920x1080:
             return "1920 x 1080"
         case .hd720:

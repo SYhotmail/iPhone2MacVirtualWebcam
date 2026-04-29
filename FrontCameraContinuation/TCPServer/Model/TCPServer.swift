@@ -184,15 +184,15 @@ private final class TCPServer {
                         self.receive(connection)
 
                     case .waiting(let error):
-                        print("⏳ Connection waiting:", error)
+                        debugPrint("⏳ Connection waiting:", error)
                         self.close(connection, cancel: true)
 
                     case .failed(let error):
-                        print("❌ Connection failed:", error)
+                        debugPrint("❌ Connection failed:", error)
                         self.close(connection, cancel: false)
 
                     case .cancelled:
-                        print("🔌 Connection cancelled")
+                        debugPrint("🔌 Connection cancelled")
                         self.close(connection, cancel: false)
                     default:
                         break
@@ -254,10 +254,10 @@ private final class TCPServer {
     }
 
     private func readSize(_ connection: NWConnection) {
-        print("📥 Waiting for frame size...")
+        debugPrint("📥 Waiting for frame size...")
         connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { sizeData, _, _, error in
             guard let sizeData, sizeData.count == 4 else {
-                print("❌ Failed to read size:", error ?? "unknown")
+                debugPrint("❌ Failed to read size:", error ?? "unknown")
                 self.close(connection, cancel: true)
                 return
             }
@@ -271,12 +271,12 @@ private final class TCPServer {
         connection.receive(minimumIncompleteLength: 1, maximumLength: expectedSize - buffer.count) {
             chunk, _, _, error in
             guard let chunk, !chunk.isEmpty else {
-                print("❌ Failed to read frame:", error ?? "unknown")
+                debugPrint("❌ Failed to read frame:", error ?? "unknown")
                 self.close(connection, cancel: true)
                 return
             }
             
-            print("📦 Receiving frame chunk:", chunk.count)
+            debugPrint("📦 Receiving frame chunk:", chunk.count)
             var newBuffer = buffer
             newBuffer.append(chunk)
 
@@ -302,7 +302,7 @@ private final class TCPServer {
                 guard self.connections.contains(where: { $0 === connection }) else { return }
             }
 
-            print("⏱️ No video frames received; closing stale connection")
+            debugPrint("⏱️ No video frames received; closing stale connection")
             self.close(connection, cancel: true)
         }
 

@@ -45,7 +45,6 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     func preparePreview(position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) {
-        beginAppActivationUpdates()
         try? captureSessionManager.configure(position: position, preset: preset, delegate: self)
     }
 
@@ -54,8 +53,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         let res = connectionManager.connect(host: host, port: port)
         assert(res)
-        beginAppActivationUpdates()
-        try? captureSessionManager.configure(position: position, preset: preset, delegate: self)
+        preparePreview(position: position, preset: preset)
     }
     
     private func encoderInvalidate() {
@@ -72,24 +70,6 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         connectionManager.sendPacketized(data)
     }
 
-    private func beginAppActivationUpdates() {
-        let name = UIApplication.didBecomeActiveNotification
-        let notificationCenter = removeNotificationCenterObserver(name)
-        notificationCenter.addObserver(
-            self,
-            selector: #selector(appDidBecomeActive),
-            name: name,
-            object: nil
-        )
-    }
-    
-    @discardableResult
-    private func removeNotificationCenterObserver(_ name: NSNotification.Name, object: Any? = nil) -> NotificationCenter {
-        let notificationCenter = NotificationCenter.default
-        notificationCenter.removeObserver(self, name: name, object: object)
-        return notificationCenter
-    }
-
     private func handleSessionInterrupted(_ reason: AVCaptureSession.InterruptionReason?) {
         if let reason {
             debugPrint("Capture session interrupted: \(reason)")
@@ -98,6 +78,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
 
         guard shouldAutoResume else { return }
+        
         encoderInvalidate()
         connectionManager.disconnect()
     }
@@ -109,15 +90,11 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
     private func handleSessionRuntimeError(_ error: Error?) {
         debugPrint("Capture session runtime error: \(String(describing: error))")
-
         guard shouldAutoResume else { return }
+        
         encoderInvalidate()
-        restartStreamingAfterCaptureRecovery()
-    }
-
-    @objc private func appDidBecomeActive(_ notification: Notification) { // TODO: think what to do here?
-        debugPrint("App became active; checking stream recovery")
-        restartStreamingAfterCaptureRecovery()
+        connectionManager.disconnect()
+        shouldAutoResume = false
     }
 
     private func restartStreamingAfterCaptureRecovery() {
