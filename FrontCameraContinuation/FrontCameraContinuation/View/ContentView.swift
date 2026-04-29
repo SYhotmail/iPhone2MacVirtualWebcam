@@ -124,64 +124,60 @@ featureChip(title: "Video Resolution", systemImage: "viewfinder")
     }
 
     private var previewSection: some View {
-        ZStack(alignment: .bottomLeading) {
-            CameraPreviewView(session: viewModel.previewSession)
-                .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 30, style: .continuous)
-                        .stroke(.white.opacity(0.22), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-                .shadow(color: .black.opacity(0.22), radius: 28, y: 16)
-
-            LinearGradient(
-                colors: [.clear, .black.opacity(0.5)],
-                startPoint: .center,
-                endPoint: .bottom
-            )
+        CameraPreviewView(session: viewModel.previewSession)
+            .overlay(alignment: .bottomLeading) {
+                previewSummary
+                    .padding(16)
+            }
+            .overlay(alignment: .topTrailing) {
+                previewControls
+                    .padding(16)
+            }
             .clipShape(RoundedRectangle(cornerRadius: 30, style: .continuous))
-            .allowsHitTesting(false)
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Preview")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white)
-                Text(viewModel.isStreaming ? "Sending the front camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.82))
-                    .fixedSize(horizontal: false, vertical: true)
+            .overlay {
+                RoundedRectangle(cornerRadius: 30, style: .continuous)
+                    .stroke(.white.opacity(0.18), lineWidth: 1)
+                    .allowsHitTesting(false)
             }
-            .padding(20)
-
-            VStack {
-                HStack(spacing: 10) {
-                    Spacer()
-
-                    Button {
-                        viewModel.togglePreviewVisibility()
-                    } label: {
-                        Image(systemName: "arrow.up.left.and.arrow.down.right")
-                            .font(.subheadline.weight(.bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 38, height: 38)
-                            .background(.black.opacity(0.42), in: Circle())
-                    }
-                    .accessibilityLabel("Hide preview")
-
-                    Text(viewModel.isStreaming ? "LIVE" : "READY")
-                        .font(.caption.weight(.bold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(viewModel.isStreaming ? Color.red : Color.black.opacity(0.55), in: Capsule())
-                }
-
-                Spacer()
-            }
-            .padding(16)
-        }
         .frame(maxWidth: .infinity)
         .frame(height: 360)
+    }
+
+    private var previewSummary: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Preview")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
+            Text(viewModel.isStreaming ? "Sending the front camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.82))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private var previewControls: some View {
+        HStack(spacing: 10) {
+            Button {
+                viewModel.togglePreviewVisibility()
+            } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right")
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.34), in: Circle())
+            }
+            .accessibilityLabel("Hide preview")
+
+            Text(viewModel.isStreaming ? "LIVE" : "READY")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(viewModel.isStreaming ? Color.red : Color.black.opacity(0.45), in: Capsule())
+        }
     }
 
     private var controlsSection: some View {

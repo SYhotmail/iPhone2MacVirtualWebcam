@@ -50,7 +50,7 @@ struct ConnectView: View {
             }
         }
         .task {
-            viewModel.refreshNetworkAddresses() // TODO: move to background...
+            viewModel.refreshNetworkAddresses()
         }
         .frame(minWidth: ConnectViewLayout.minimumWindowSize.width,
                minHeight: ConnectViewLayout.minimumWindowSize.height)
