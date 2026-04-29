@@ -13,6 +13,7 @@ import UIKit
 import Combine
 
 final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private static let annexBStartCode = [UInt8](arrayLiteral: 0, 0, 0, 1)
 
     let session = AVCaptureSession()
     private var compressionSession: VTCompressionSession?
@@ -124,14 +125,26 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     }
 
     private func send(_ data: Data) {
-        var size = UInt32(data.count).bigEndian
-        let header = Data(bytes: &size, count: 4)
-        
-        connection?.send(content: header + data, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ error in
+        let packet = packetizedPayload(capacity: data.count) { packet in
+            packet.append(data)
+        }
+
+        connection?.send(content: packet, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ error in
             guard let error else { return }
             debugPrint("!!! Error: \(error.localizedDescription)")
-            let disconnectedSocket = error.errorCode == 57 || error.errorCode == 54 // closed connection...
+            _ = error.errorCode == 57 || error.errorCode == 54 // closed connection...
         }))
+    }
+
+    private func packetizedPayload(capacity: Int, body: (inout Data) -> Void) -> Data {
+        var size = UInt32(capacity).bigEndian
+        var packet = Data()
+        packet.reserveCapacity(4 + capacity)
+        withUnsafeBytes(of: &size) { headerBuffer in
+            packet.append(contentsOf: headerBuffer)
+        }
+        body(&packet)
+        return packet
     }
 
     // MARK: - Camera
@@ -156,6 +169,10 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             }
             
             let output = AVCaptureVideoDataOutput()
+            output.alwaysDiscardsLateVideoFrames = true
+            output.videoSettings = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            ]
             output.setSampleBufferDelegate(self, queue: captureQueue)
             session.outputs.forEach { session.removeOutput($0) }
             
@@ -429,30 +446,23 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         (refCon, _, status, _, sampleBuffer) in
 
         guard status == noErr,
-              let sampleBuffer = sampleBuffer,
+              let sampleBuffer,
+              let refCon,
               CMSampleBufferDataIsReady(sampleBuffer) else { return }
 
-        let streamer = Unmanaged<CameraStreamer>.fromOpaque(refCon!).takeUnretainedValue()
+        let streamer = Unmanaged<CameraStreamer>.fromOpaque(refCon).takeUnretainedValue()
 
         // Detect keyframe
-        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true)! as NSArray
-        let dict = attachments[0] as! NSDictionary
-        let isKeyframe = !(dict[kCMSampleAttachmentKey_NotSync] as? Bool ?? false)
-        
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true).flatMap { $0 as NSArray }
+        let dict = attachments?.firstObject as? NSDictionary
+        let notSync = dict?[kCMSampleAttachmentKey_NotSync] as? Bool
+        let isKeyframe = notSync != true
         if isKeyframe || !streamer.sentConfig {
-            print("📡 isKeyframe:", isKeyframe)
-            
             streamer.sendParameterSets(from: sampleBuffer)
             streamer.sentConfig = true
         }
 
-        // Extract and send NAL units in Annex-B format
-        let nalUnits = streamer.extractNALUnits(from: sampleBuffer)
-        for nal in nalUnits {
-            var packet = Data([0,0,0,1]) // start code
-            packet.append(nal)
-            streamer.send(packet)
-        }
+        streamer.sendNALUnits(from: sampleBuffer)
     }
 
     // MARK: - H264 helpers
@@ -489,33 +499,15 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         )
 
         guard let spsPointer, let ppsPointer else {
-            print("❌ Failed to extract SPS/PPS")
             return
         }
 
-        let sps = Data(bytes: spsPointer, count: spsSize)
-        let pps = Data(bytes: ppsPointer, count: ppsSize)
-
-        print("📡 Sending SPS:", sps.count)
-        print("📡 Sending PPS:", pps.count)
-
-        let startCode = Data([0, 0, 0, 1])
-
-        // ✅ Send SPS separately
-        var spsPacket = Data()
-        spsPacket.append(startCode)
-        spsPacket.append(sps)
-        send(spsPacket)
-
-        // ✅ Send PPS separately
-        var ppsPacket = Data()
-        ppsPacket.append(startCode)
-        ppsPacket.append(pps)
-        send(ppsPacket)
+        sendAnnexBNALUnit(bytes: spsPointer, count: spsSize)
+        sendAnnexBNALUnit(bytes: ppsPointer, count: ppsSize)
     }
 
-    private func extractNALUnits(from sampleBuffer: CMSampleBuffer) -> [Data] {
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return [] }
+    private func sendNALUnits(from sampleBuffer: CMSampleBuffer) {
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
 
         var length = 0
         var totalLength = 0
@@ -529,23 +521,32 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
             dataPointerOut: &dataPointer
         )
 
+        guard let dataPointer else {
+            return
+        }
+
         var offset = 0
-        var nalUnits: [Data] = []
 
         while offset < totalLength {
             var nalLength32: UInt32 = 0
-            memcpy(&nalLength32, dataPointer!.advanced(by: offset), 4)
+            memcpy(&nalLength32, dataPointer.advanced(by: offset), 4)
             let nalLength = Int(CFSwapInt32BigToHost(nalLength32))
 
             let nalStart = offset + 4
-            let nalData = Data(bytes: dataPointer!.advanced(by: nalStart), count: nalLength)
-
-            nalUnits.append(nalData)
+            let nalPointer = UnsafeRawPointer(dataPointer.advanced(by: nalStart)).assumingMemoryBound(to: UInt8.self)
+            sendAnnexBNALUnit(bytes: nalPointer, count: nalLength)
 
             offset += 4 + nalLength
         }
+    }
 
-        return nalUnits
+    private func sendAnnexBNALUnit(bytes: UnsafePointer<UInt8>, count: Int) {
+        let payloadSize = Self.annexBStartCode.count + count
+        let packet = packetizedPayload(capacity: payloadSize) { packet in
+            packet.append(contentsOf: Self.annexBStartCode)
+            packet.append(bytes, count: count)
+        }
+        connection?.send(content: packet, contentContext: .defaultMessage, isComplete: true, completion: .idempotent)
     }
 
     // MARK: - Capture delegate
@@ -605,4 +606,3 @@ private extension AVCaptureVideoOrientation {
         }
     }
 }
-
