@@ -119,6 +119,10 @@ final class CaptureSessionManager {
         if session.canAddInput(input) {
             session.addInput(input)
         }
+        
+        if session.isMultitaskingCameraAccessSupported, !session.isMultitaskingCameraAccessEnabled {
+            session.isMultitaskingCameraAccessEnabled = true
+        }
 
         let output = AVCaptureVideoDataOutput()
         assert(output.alwaysDiscardsLateVideoFrames == true)

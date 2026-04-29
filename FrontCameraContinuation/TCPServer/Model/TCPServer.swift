@@ -50,10 +50,14 @@ final class ServerManager {
         }
 
         server.onStreamUnavailable = { [weak self] in
-            self?.decoder.resetForStreamRestart()
+            self?.resetDecoder()
         }
         
         try? server.start(port: port)
+    }
+    
+    private func resetDecoder() {
+        decoder.reset()
     }
     
     func stop() {
@@ -61,7 +65,7 @@ final class ServerManager {
         server.onStreamUnavailable = nil
         decodedFrameCancellable = nil
         sinkClient.stop()
-        decoder.resetForStreamRestart()
+        resetDecoder()
         server.stop()
     }
 }
