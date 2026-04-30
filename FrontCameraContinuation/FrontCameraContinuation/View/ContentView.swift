@@ -86,7 +86,7 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(fieldBorderColor, lineWidth: 1)
                     }
-                }
+                }.layoutPriority(1)
                 
                 Spacer(minLength: 0)
                 
@@ -132,8 +132,7 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
                             .stroke(fieldBorderColor, lineWidth: 1)
                     }
-                }
-                
+                }.layoutPriority(1)
             }
         }
     }
