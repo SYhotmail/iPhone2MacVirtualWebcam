@@ -8,12 +8,13 @@ struct CameraPreviewView: UIViewRepresentable {
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer.videoGravity = .resizeAspectFill
+        view.previewLayer.videoGravity = .resizeAspect
         defineUIView(view)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
+        context.coordinator.defineView(uiView)
         defineUIView(uiView)
     }
     
@@ -24,8 +25,49 @@ struct CameraPreviewView: UIViewRepresentable {
         }
     }
     
-    static func dismantleUIView(_ uiView: PreviewView, coordinator: ()) {
-        uiView.session = nil
+    static func dismantleUIView(_ uiView: PreviewView, coordinator: Coordinator) {
+        uiView.reset()
+        coordinator.undefineView(uiView)
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+    
+    final class Coordinator: NSObject {
+        
+        lazy var doubleTapGesture: UITapGestureRecognizer! = {
+            let tap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(sender: )))
+            tap.numberOfTapsRequired = 2
+            return tap
+        }()
+        
+        func defineView(_ uiView: PreviewView) {
+            uiView.addGestureRecognizer(doubleTapGesture)
+        }
+        
+        func undefineView(_ uiView: PreviewView) {
+            guard let index = uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture } ) else {
+                return
+            }
+            uiView.gestureRecognizers?.remove(at: index)
+        }
+        
+        @objc private func handleDoubleTap(sender: UITapGestureRecognizer) {
+            guard let view = sender.view as? PreviewView else {
+                return
+            }
+            
+            switch view.previewLayer.videoGravity {
+            case .resizeAspect:
+                view.previewLayer.videoGravity = .resizeAspectFill
+            case .resizeAspectFill:
+                view.previewLayer.videoGravity = .resizeAspect
+            default:
+                break
+            }
+        }
+        
     }
 }
 
@@ -48,6 +90,11 @@ final class PreviewView: UIView {
         set {
             previewLayer.session = newValue
         }
+    }
+    
+    func reset() {
+        rotationCoordinator = nil
+        session = nil
     }
 
     func refreshRotationCoordinator() {

@@ -12,11 +12,11 @@ import CoreMedia
 internal import AVFoundation
 
 struct VideoViewRepresentable: NSViewRepresentable {
-    let decoder: H264Decoder
+    let frameProvider: any PreviewDecodedFrameProvidable
     
     private func defineVideoView(_ nsView: VideoView, context: Context) {
         let coordinator = context.coordinator
-        coordinator.bind(decoder: decoder, renderer: nsView.sampleBufferRenderer)
+        coordinator.bind(frameProvider: frameProvider, renderer: nsView.sampleBufferRenderer)
     }
     
     func makeNSView(context: Context) -> VideoView {
@@ -40,11 +40,11 @@ struct VideoViewRepresentable: NSViewRepresentable {
     final class Coordinator: NSObject {
         var cancellable: AnyCancellable?
         
-        func bind(decoder: H264Decoder, renderer: AVSampleBufferVideoRenderer?) {
+        func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
             guard let renderer else {
                 return
             }
-            cancellable = decoder.decodedFramePublisher.share().sink { [weak renderer] buffer in
+            cancellable = frameProvider.decodedFrameSubject().sink { [weak renderer] buffer in
                 renderer?.enqueue(buffer)
             }
         }

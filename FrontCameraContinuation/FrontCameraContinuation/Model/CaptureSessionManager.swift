@@ -4,8 +4,6 @@ import UIKit
 import OSLog
 
 final class CaptureSessionManager {
-    private static let preferredFrameRate: CMTimeScale = 30
-
     let session = AVCaptureSession()
     
     var onSessionInterrupted: ((AVCaptureSession.InterruptionReason?) -> Void)?
@@ -36,9 +34,11 @@ final class CaptureSessionManager {
     }
     
     private let logger: Logger?
+    let preferedFrameDuration: CMTime
     
-    init(logger: Logger? = { Bundle.main.bundleIdentifier.flatMap { .init(subsystem: $0, category: "capture.session.manager") } }()) {
+    init(preferedFrameDuration: CMTime = VirtualCameraConfiguration.frameDuration, logger: Logger? = { Bundle.main.bundleIdentifier.flatMap { .init(subsystem: $0, category: "capture.session.manager") } }()) {
         captureQueue = .init(label: "camera.session.manager", qos: .userInitiated)
+        self.preferedFrameDuration = preferedFrameDuration
         self.logger = logger
     }
 
@@ -144,7 +144,7 @@ final class CaptureSessionManager {
     }
 
     private func configureFrameRate(for device: AVCaptureDevice) throws {
-        let desiredFrameDuration = CMTime(value: 1, timescale: Self.preferredFrameRate)
+        let desiredFrameDuration = preferedFrameDuration
         let supportsDesiredFrameRate = device.activeFormat.videoSupportedFrameRateRanges.contains {
             $0.minFrameDuration <= desiredFrameDuration && $0.maxFrameDuration >= desiredFrameDuration
         }

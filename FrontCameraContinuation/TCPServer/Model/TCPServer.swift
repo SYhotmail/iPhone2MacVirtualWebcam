@@ -13,114 +13,6 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 
-final class StreamDiagnostics {
-    static let shared = StreamDiagnostics()
-
-    enum Counter: String, CaseIterable {
-        case tcpReceived = "tcp.received"
-        case decodeRequested = "decode.requested"
-        case decodeDropped = "decode.dropped"
-        case decodeSubmitted = "decode.submitted"
-        case decodeOutput = "decode.output"
-        case decodeError = "decode.error"
-        case previewEnqueued = "preview.enqueued"
-        case previewDropped = "preview.dropped"
-    }
-
-    private let lock = NSLock()
-    private var counts = [Counter: Int]()
-    private var lastFlush = Date()
-
-    private init() {}
-
-    func mark(_ counter: Counter, amount: Int = 1) {
-        lock.lock()
-        counts[counter, default: 0] += amount
-
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastFlush)
-        guard elapsed >= 1 else {
-            lock.unlock()
-            return
-        }
-
-        let snapshot = Counter.allCases.compactMap { counter -> String? in
-            guard let count = counts[counter], count > 0 else {
-                return nil
-            }
-            return "\(counter.rawValue)=\(count)/s"
-        }
-
-        counts.removeAll(keepingCapacity: true)
-        lastFlush = now
-        lock.unlock()
-
-        guard !snapshot.isEmpty else {
-            return
-        }
-
-        debugPrint("STREAM STATS", snapshot.joined(separator: " "))
-    }
-}
-
-final class ServerManager {
-    private let server = TCPServer()
-    private let sinkClient = VirtualCameraSinkClient()
-    private let frameConverter = VirtualCameraSampleBufferConverter()
-    private var decodedFrameCancellable: AnyCancellable?
-    let decoder = H264Decoder()
-    
-    var listenerStatusPublisher: AnyPublisher<String, Never> {
-        server.listenerState.map(\.debugDescription).receive(on: RunLoop.main).eraseToAnyPublisher()
-    }
-    
-    var connectionStateLastPublisher: AnyPublisher<String, Never> {
-        server.connectionStates.map { publisher in publisher.map(\.debugDescription).receive(on: RunLoop.main).eraseToAnyPublisher() }.last!
-    }
-    
-    var connectedPublisher: AnyPublisher<Bool, Never> {
-        server.listenerState.combineLatest(server.connectionStates.last!).map { $0 == .ready && $1 == .ready }.removeDuplicates().receive(on: RunLoop.main).eraseToAnyPublisher()
-    }
-    
-    func start(port: UInt16 = 9999) {
-        sinkClient.start()
-
-        decodedFrameCancellable = decoder.decodedFramePublisher
-            .share()
-            .receive(on: DispatchQueue.global(qos: .userInitiated))
-            .compactMap { [frameConverter] sampleBuffer in
-                frameConverter.makeSampleBuffer(from: sampleBuffer)
-            }
-            .sink { [weak sinkClient] sampleBuffer in
-                sinkClient?.enqueue(sampleBuffer)
-            }
-
-        server.onFrame = { [weak self] data in
-            StreamDiagnostics.shared.mark(.tcpReceived)
-            self?.decoder.decode(data)
-        }
-
-        server.onStreamUnavailable = { [weak self] in
-            self?.resetDecoder()
-        }
-        
-        try? server.start(port: port)
-    }
-    
-    private func resetDecoder() {
-        decoder.reset()
-    }
-    
-    func stop() {
-        server.onFrame = nil
-        server.onStreamUnavailable = nil
-        decodedFrameCancellable = nil
-        sinkClient.stop()
-        resetDecoder()
-        server.stop()
-    }
-}
-
 protocol NetworkConnectionStateProvable {
     var error: NWError? { get }
     var isConnected: Bool { get }
@@ -204,7 +96,7 @@ extension NWListener.State: NetworkConnectionStateProvable, @retroactive CustomD
     }
 }
 
-private final class TCPServer {
+final class TCPServer {
 
     var onFrame: ((Data) -> Void)?
     var onStreamUnavailable: (() -> Void)?

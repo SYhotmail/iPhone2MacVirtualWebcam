@@ -290,7 +290,7 @@ struct ConnectView: View {
             }
 
             ZStack {
-                VideoViewRepresentable(decoder: viewModel.manager.decoder)
+                VideoViewRepresentable(frameProvider: viewModel.manager)
                     .clipShape(RoundedRectangle(cornerRadius: ConnectViewLayout.previewCornerRadius, style: .continuous))
 
                 RoundedRectangle(cornerRadius: ConnectViewLayout.previewCornerRadius, style: .continuous)

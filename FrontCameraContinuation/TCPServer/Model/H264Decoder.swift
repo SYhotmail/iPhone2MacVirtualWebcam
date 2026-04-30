@@ -10,24 +10,76 @@ import VideoToolbox
 import QuartzCore
 import Combine
 
+final class StreamDiagnostics {
+    static let shared = StreamDiagnostics()
+
+    enum Counter: String, CaseIterable {
+        case tcpReceived = "tcp.received"
+        case decodeRequested = "decode.requested"
+        case decodeDropped = "decode.dropped"
+        case decodeSubmitted = "decode.submitted"
+        case decodeOutput = "decode.output"
+        case decodeError = "decode.error"
+        case previewEnqueued = "preview.enqueued"
+        case previewDropped = "preview.dropped"
+    }
+
+    private let lock = NSLock()
+    private var counts = [Counter: Int]()
+    private var lastFlush = Date()
+
+    private init() {}
+
+    func mark(_ counter: Counter, amount: Int = 1) {
+        lock.lock()
+        counts[counter, default: 0] += amount
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastFlush)
+        guard elapsed >= 1 else {
+            lock.unlock()
+            return
+        }
+
+        let snapshot = Counter.allCases.compactMap { counter -> String? in
+            guard let count = counts[counter], count > 0 else {
+                return nil
+            }
+            return "\(counter.rawValue)=\(count)/s"
+        }
+
+        counts.removeAll(keepingCapacity: true)
+        lastFlush = now
+        lock.unlock()
+
+        guard !snapshot.isEmpty else {
+            return
+        }
+
+        debugPrint("STREAM STATS", snapshot.joined(separator: " "))
+    }
+}
+
+
 protocol Decoding {
     func decode( _data: Data)
     func reset()
 }
 
 final class H264Decoder {
-    private static let maxQueuedDecodeOperations = 2 * 10
-
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
 
     private var sps: Data?
     private var pps: Data?
     let decodedFramePublisher = PassthroughSubject<CMSampleBuffer, Never>()
+    
+    
     let queue: OperationQueue
+    let streamDiagnostics: StreamDiagnostics
     
-    
-    init() {
+    init(streamDiagnostics: StreamDiagnostics = .shared) {
+        self.streamDiagnostics = streamDiagnostics
         let queue = OperationQueue()
         queue.qualityOfService = .userInitiated
         // H.264 access units must stay in order for the decompression session.
@@ -46,31 +98,19 @@ final class H264Decoder {
     }
     
     func decode(_ data: Data) {
+        streamDiagnostics.mark(.tcpReceived)
         guard data.count > 4 else { return }
-        StreamDiagnostics.shared.mark(.decodeRequested)
+        streamDiagnostics.mark(.decodeRequested)
         let nalUnits = Self.splitAnnexBNALUnits(in: data)
         guard !nalUnits.isEmpty else { return }
-
-        if shouldDropNALUnits(nalUnits) {
-            StreamDiagnostics.shared.mark(.decodeDropped)
-            return
-        }
 
         queue.addOperation { [weak self] in
             guard let self, !self.queue.isSuspended else {
                 return
             }
-            StreamDiagnostics.shared.mark(.decodeSubmitted)
+            streamDiagnostics.mark(.decodeSubmitted)
             self.decodeAccessUnit(nalUnits)
         }
-    }
-
-    private func shouldDropNALUnits(_ nalUnits: [Data]) -> Bool {
-        guard !nalUnits.contains(where: Self.isPriorityNALUnit) else {
-            return false
-        }
-
-        return queue.operationCount >= Self.maxQueuedDecodeOperations
     }
     
     private func decodeAccessUnit(_ nalUnits: [Data]) {
@@ -111,7 +151,7 @@ final class H264Decoder {
             return
         }
 
-        Self.decodeFrame(frameNALUnits, session: session, formatDescription: formatDescription)
+        decodeFrame(frameNALUnits, session: session, formatDescription: formatDescription)
     }
 
     private func resetDecoder() {
@@ -188,7 +228,7 @@ final class H264Decoder {
         return Self.valueOnStatusSuccess(sessionOut, status: status)
     }
 
-    private static func decodeFrame(_ nalUnits: [Data], session: VTDecompressionSession, formatDescription: CMFormatDescription) {
+    private func decodeFrame(_ nalUnits: [Data], session: VTDecompressionSession, formatDescription: CMFormatDescription) {
         guard !nalUnits.isEmpty else { return }
 
         // Convert Annex-B access unit → AVCC by length-prefixing each NAL in the frame.
@@ -262,7 +302,7 @@ final class H264Decoder {
         )
         
         guard Self.valueOnStatusSuccess(flags, status: decodeStatus) != nil else {
-            StreamDiagnostics.shared.mark(.decodeError)
+            streamDiagnostics.mark(.decodeError)
             return
         }
     }
@@ -391,7 +431,7 @@ final class H264Decoder {
 
     private func handleDecodedFrame(_ pixelBuffer: CVImageBuffer) {
         guard let sampleBuffer = Self.makeSampleBuffer(from: pixelBuffer) else { return }
-        StreamDiagnostics.shared.mark(.decodeOutput)
+        streamDiagnostics.mark(.decodeOutput)
         decodedFramePublisher.send(sampleBuffer)
     }
 }

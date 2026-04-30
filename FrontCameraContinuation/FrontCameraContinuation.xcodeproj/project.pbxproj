@@ -56,6 +56,13 @@
 			);
 			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
 		};
+		21583F262FA3EDEC00FCF073 /* Exceptions for "Shared" folder in "FrontCameraContinuation" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				VirtualCameraConfiguration.swift,
+			);
+			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -80,6 +87,7 @@
 		A10000022F9143AA00163538 /* Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				21583F262FA3EDEC00FCF073 /* Exceptions for "Shared" folder in "FrontCameraContinuation" target */,
 				2139DC3F2F92E7C200ECF1D1 /* Exceptions for "Shared" folder in "VirtualCameraExtension" target */,
 			);
 			path = Shared;
