@@ -93,6 +93,7 @@ final class PreviewView: UIView {
     }
     
     func reset() {
+        rotationCancellable = nil
         rotationCoordinator = nil
         session = nil
     }

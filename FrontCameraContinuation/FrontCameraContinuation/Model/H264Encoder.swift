@@ -6,16 +6,22 @@ final class H264Encoder {
     typealias OutputHandler = (Data) -> Void
 
     private static let annexBStartCode = [UInt8](arrayLiteral: 0, 0, 0, 1)
-    private static let expectedFrameRate = 30
+    private let expectedFrameRate: Int
 
     private var compressionSession: VTCompressionSession?
     private var sentConfig = false
     private var frameIndex = 0
     private var encodedWidth: Int32 = 0
     private var encodedHeight: Int32 = 0
-    static let maxKeyInterval = 30
+    private let maxKeyInterval: Int
     var outputHandler: OutputHandler!
 
+    init(expectedFrameRate: Int = VirtualCameraConfiguration.frameRate,
+         maxKeyInterval: Int = VirtualCameraConfiguration.frameRate) {
+        assert(expectedFrameRate > 0 && maxKeyInterval > 0)
+        self.expectedFrameRate = expectedFrameRate
+        self.maxKeyInterval = maxKeyInterval
+    }
 
     func encode(_ sampleBuffer: CMSampleBuffer) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
@@ -25,7 +31,7 @@ final class H264Encoder {
         
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
         frameIndex += 1
-        let shouldForceKeyframe = frameIndex % Self.maxKeyInterval == 0
+        let shouldForceKeyframe = frameIndex % maxKeyInterval == 0
         let frameProperties: CFDictionary? = shouldForceKeyframe
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
             : nil
@@ -90,10 +96,10 @@ final class H264Encoder {
                              value: kCFBooleanFalse)
         VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
-                             value: Self.maxKeyInterval as CFTypeRef)
+                             value: maxKeyInterval as CFTypeRef)
         VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_ExpectedFrameRate,
-                             value: Self.expectedFrameRate as CFTypeRef)
+                             value: expectedFrameRate as CFTypeRef)
         VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_ProfileLevel,
                              value: kVTProfileLevel_H264_Baseline_AutoLevel)

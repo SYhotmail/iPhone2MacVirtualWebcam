@@ -9,8 +9,9 @@ enum VirtualCameraConfiguration {
     static let streamHeight = 720
     static let pixelFormat = kCVPixelFormatType_32BGRA
 
+    static let frameRate = 30
+    
     static var frameDuration: CMTime {
-        let frameRate = 60
         return CMTime(value: 1, timescale: CMTimeScale(frameRate))
     }
 }

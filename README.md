@@ -13,7 +13,7 @@ The project contains:
 1. Run `Cam2Mac` on your Mac.
 2. Install and activate the virtual camera from the Mac app.
 3. Run `FrontCameraContinuation` on your iPhone.
-4. Use the LAN IP address and port shown in the Mac app, then enter them in the iPhone app.
+4. Use the LAN IP address and port shown in the Mac app, then enter them in the iPhone app (if they don't match)
 5. Start streaming from the iPhone.
 6. Select the virtual camera(Remote Camera) in Zoom, Meet, QuickTime, or another camera app on macOS.
 
