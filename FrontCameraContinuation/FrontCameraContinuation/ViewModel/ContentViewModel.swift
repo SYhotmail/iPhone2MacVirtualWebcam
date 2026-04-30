@@ -58,14 +58,7 @@ final class ContentViewModel {
     }
     
     private var connectionCancellable: AnyCancellable?
-    private(set)var isPreviewVisible = false {
-        didSet {
-            guard oldValue != isPreviewVisible, isPreviewVisible else {
-                return
-            }
-            preparePreview()
-        }
-    }
+    private(set)var isPreviewVisible = false
     private(set)var isStreaming = false {
         didSet {
             guard oldValue != isStreaming else {
@@ -101,6 +94,9 @@ final class ContentViewModel {
     // MARK: - Actions
 
     func togglePreviewVisibility() {
+        if !isPreviewVisible, !isStreaming {
+            preparePreview()
+        }
         isPreviewVisible.toggle()
     }
     

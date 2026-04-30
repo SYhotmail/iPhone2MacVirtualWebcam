@@ -44,16 +44,23 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
     }
 
-    func preparePreview(position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) {
-        try? captureSessionManager.configure(position: position, preset: preset, delegate: self)
+    @discardableResult
+    func preparePreview(position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) -> Bool {
+        do {
+            try captureSessionManager.configure(position: position, preset: preset, delegate: self)
+            return true
+        } catch {
+            debugPrint(error)
+            return false
+        }
     }
 
-    func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) {
+    func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) -> Bool {
         shouldAutoResume = true
 
-        let res = connectionManager.connect(host: host, port: port)
-        assert(res)
-        preparePreview(position: position, preset: preset)
+        let connected = connectionManager.connect(host: host, port: port)
+        assert(connected)
+        return preparePreview(position: position, preset: preset) && connected
     }
     
     private func encoderInvalidate() {
