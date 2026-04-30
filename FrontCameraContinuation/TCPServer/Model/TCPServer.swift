@@ -162,7 +162,7 @@ private final class TCPServer {
     
     private var connections = [NWConnection]()
     private var inactivityTimers = [ObjectIdentifier: DispatchWorkItem]()
-    private let inactivityTimeout: TimeInterval = 1.5
+    private let inactivityTimeout: TimeInterval = 2
     let connectionStates = [CurrentValueSubject<NWConnection.State, Never>].init(repeating: .init(.setup), count: 1)
     let listenerState = CurrentValueSubject<NWListener.State, Never>(.setup)
     
@@ -208,7 +208,7 @@ private final class TCPServer {
                 self.cancelConnections(force: true)
                 self.connections.append(connection)
             }
-            connection.start(queue: .global())
+            connection.start(queue: .global(qos: .userInitiated))
             //self.receive(connection)
         }
         
@@ -218,7 +218,7 @@ private final class TCPServer {
         }
 
         self.listener = listener
-        listener.start(queue: .global())
+        listener.start(queue: .global(qos: .userInitiated))
     }
     
     private func remove(_ connection: NWConnection) {

@@ -9,7 +9,6 @@
 import VideoToolbox
 import QuartzCore
 import Combine
-import Synchronization
 
 protocol Decoding {
     func decode( _data: Data)
@@ -24,18 +23,33 @@ final class H264Decoder {
     private var sps: Data?
     private var pps: Data?
     let decodedFramePublisher = PassthroughSubject<CMSampleBuffer, Never>()
+    let queue: OperationQueue
     
-    let lock = Mutex(())
+    
+    init() {
+        let queue = OperationQueue()
+        queue.qualityOfService = .userInitiated
+        queue.maxConcurrentOperationCount = 1
+        queue.name = "by.sy.H264Decoder.decodeQueue"
+        self.queue = queue
+    }
     
     func reset() {
-        lock.withLock { _ in
-            resetForStreamCore()
+        queue.addOperation { [weak self] in
+            guard let self, !self.queue.isSuspended else {
+                return
+            }
+            self.resetForStreamCore()
         }
     }
     
     func decode(_ data: Data) {
-        lock.withLock { _ in
-            decodeCore(data)
+        guard data.count > 4 else { return }
+        queue.addOperation { [weak self] in
+            guard let self, !self.queue.isSuspended else {
+                return
+            }
+            self.decodeCore(data)
         }
     }
     
@@ -153,6 +167,7 @@ final class H264Decoder {
 
     private static func decodeFrame(_ data: Data, session: VTDecompressionSession, formatDescription: CMFormatDescription) {
         // Convert Annex-B → AVCC (replace start code with length)
+        assert(!Thread.isMainThread)
         var length = UInt32(data.count - 4).bigEndian
         var buffer = Data(bytes: &length, count: 4)
         buffer.append(data.advanced(by: 4))

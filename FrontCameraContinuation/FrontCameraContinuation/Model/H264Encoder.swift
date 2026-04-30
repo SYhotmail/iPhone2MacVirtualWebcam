@@ -20,6 +20,8 @@ final class H264Encoder {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
               let session = compressionSession(for: pixelBuffer) else { return }
 
+        assert(!Thread.isMainThread)
+        
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
         frameIndex += 1
         let shouldForceKeyframe = frameIndex % Self.maxKeyInterval == 0
@@ -170,7 +172,7 @@ final class H264Encoder {
         var totalLength = 0
         var dataPointer: UnsafeMutablePointer<Int8>?
 
-        CMBlockBufferGetDataPointer(
+        let res = CMBlockBufferGetDataPointer(
             blockBuffer,
             atOffset: 0,
             lengthAtOffsetOut: &length,
@@ -178,7 +180,7 @@ final class H264Encoder {
             dataPointerOut: &dataPointer
         )
 
-        guard let dataPointer, let outputHandler else {
+        guard let dataPointer, res == noErr, let outputHandler else {
             return
         }
 
