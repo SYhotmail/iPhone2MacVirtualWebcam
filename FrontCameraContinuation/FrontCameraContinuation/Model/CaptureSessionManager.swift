@@ -4,6 +4,8 @@ import UIKit
 import OSLog
 
 final class CaptureSessionManager {
+    private static let preferredFrameRate: CMTimeScale = 30
+
     let session = AVCaptureSession()
     
     var onSessionInterrupted: ((AVCaptureSession.InterruptionReason?) -> Void)?
@@ -119,6 +121,8 @@ final class CaptureSessionManager {
         if session.canAddInput(input) {
             session.addInput(input)
         }
+
+        try configureFrameRate(for: device)
         
         if session.isMultitaskingCameraAccessSupported, !session.isMultitaskingCameraAccessEnabled {
             session.isMultitaskingCameraAccessEnabled = true
@@ -137,6 +141,31 @@ final class CaptureSessionManager {
         }
         videoOutput = output
         rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+    }
+
+    private func configureFrameRate(for device: AVCaptureDevice) throws {
+        let desiredFrameDuration = CMTime(value: 1, timescale: Self.preferredFrameRate)
+        let supportsDesiredFrameRate = device.activeFormat.videoSupportedFrameRateRanges.contains {
+            $0.minFrameDuration <= desiredFrameDuration && $0.maxFrameDuration >= desiredFrameDuration
+        }
+
+        guard supportsDesiredFrameRate else {
+            logger?.debug("Device does not support target frame duration \(desiredFrameDuration.seconds, privacy: .public)s")
+            return
+        }
+
+        try device.lockForConfiguration()
+        defer {
+            device.unlockForConfiguration()
+        }
+
+        if device.activeVideoMinFrameDuration != desiredFrameDuration {
+            device.activeVideoMinFrameDuration = desiredFrameDuration
+        }
+
+        if device.activeVideoMaxFrameDuration != desiredFrameDuration {
+            device.activeVideoMaxFrameDuration = desiredFrameDuration
+        }
     }
 
     private func scheduleChangeSession(shouldRun: Bool) {

@@ -6,6 +6,7 @@ final class H264Encoder {
     typealias OutputHandler = (Data) -> Void
 
     private static let annexBStartCode = [UInt8](arrayLiteral: 0, 0, 0, 1)
+    private static let expectedFrameRate = 30
 
     private var compressionSession: VTCompressionSession?
     private var sentConfig = false
@@ -91,8 +92,20 @@ final class H264Encoder {
                              key: kVTCompressionPropertyKey_MaxKeyFrameInterval,
                              value: Self.maxKeyInterval as CFTypeRef)
         VTSessionSetProperty(compressionSession,
+                             key: kVTCompressionPropertyKey_ExpectedFrameRate,
+                             value: Self.expectedFrameRate as CFTypeRef)
+        VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_ProfileLevel,
                              value: kVTProfileLevel_H264_Baseline_AutoLevel)
+
+        let averageBitRate = targetBitRate(width: width, height: height)
+        VTSessionSetProperty(compressionSession,
+                             key: kVTCompressionPropertyKey_AverageBitRate,
+                             value: averageBitRate as CFTypeRef)
+        let dataRateLimits: [Int] = [averageBitRate * 2, 1]
+        VTSessionSetProperty(compressionSession,
+                             key: kVTCompressionPropertyKey_DataRateLimits,
+                             value: dataRateLimits as CFArray)
 
         VTCompressionSessionPrepareToEncodeFrames(compressionSession)
 
@@ -100,6 +113,20 @@ final class H264Encoder {
         encodedHeight = height
         sentConfig = false
         frameIndex = 0
+    }
+
+    private func targetBitRate(width: Int32, height: Int32) -> Int {
+        let pixels = Int(width) * Int(height)
+        switch pixels {
+        case 0..<(640 * 480):
+            return 1_000_000
+        case 0..<(1280 * 720):
+            return 2_000_000
+        case 0..<(1920 * 1080):
+            return 4_000_000
+        default:
+            return 6_000_000
+        }
     }
 
     private let compressionCallback: VTCompressionOutputCallback = { refCon, _, status, _, sampleBuffer in
@@ -119,16 +146,34 @@ final class H264Encoder {
             shouldSentConfig = isKeyframe
         }
         
-        if shouldSentConfig {
-            encoder.sendParameterSets(from: sampleBuffer)
-            encoder.sentConfig = true
+        guard let packet = encoder.makeAccessUnitPacket(from: sampleBuffer, includeParameterSets: shouldSentConfig),
+              let outputHandler = encoder.outputHandler else {
+            return
         }
 
-        encoder.sendNALUnits(from: sampleBuffer)
+        outputHandler(packet)
+
+        if shouldSentConfig {
+            encoder.sentConfig = true
+        }
     }
 
-    private func sendParameterSets(from sampleBuffer: CMSampleBuffer) {
-        guard let outputHandler, let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return }
+    private func makeAccessUnitPacket(from sampleBuffer: CMSampleBuffer, includeParameterSets: Bool) -> Data? {
+        var packet = Data()
+
+        if includeParameterSets, !appendParameterSets(from: sampleBuffer, to: &packet) {
+            return nil
+        }
+
+        guard appendNALUnits(from: sampleBuffer, to: &packet), !packet.isEmpty else {
+            return nil
+        }
+
+        return packet
+    }
+
+    private func appendParameterSets(from sampleBuffer: CMSampleBuffer, to packet: inout Data) -> Bool {
+        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return false }
 
         var spsPointer: UnsafePointer<UInt8>?
         var spsSize = 0
@@ -143,9 +188,9 @@ final class H264Encoder {
                     nalUnitHeaderLengthOut: nil
         )
         guard let spsPointer, res == noErr else {
-            return
+            return false
         }
-        outputHandler(annexBPacket(bytes: spsPointer, count: spsSize))
+        appendAnnexBPacket(bytes: spsPointer, count: spsSize, to: &packet)
 
         var ppsPointer: UnsafePointer<UInt8>?
         var ppsSize = 0
@@ -160,13 +205,14 @@ final class H264Encoder {
                 nalUnitHeaderLengthOut: nil
         )
         guard let ppsPointer, res == noErr else {
-            return
+            return false
         }
-        outputHandler(annexBPacket(bytes: ppsPointer, count: ppsSize))
+        appendAnnexBPacket(bytes: ppsPointer, count: ppsSize, to: &packet)
+        return true
     }
 
-    private func sendNALUnits(from sampleBuffer: CMSampleBuffer) {
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+    private func appendNALUnits(from sampleBuffer: CMSampleBuffer, to packet: inout Data) -> Bool {
+        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return false }
 
         var length = 0
         var totalLength = 0
@@ -180,8 +226,8 @@ final class H264Encoder {
             dataPointerOut: &dataPointer
         )
 
-        guard let dataPointer, res == noErr, let outputHandler else {
-            return
+        guard let dataPointer, res == noErr else {
+            return false
         }
 
         var offset = 0
@@ -191,16 +237,16 @@ final class H264Encoder {
             let nalLength = Int(CFSwapInt32BigToHost(nalLength32))
             let nalStart = offset + 4
             let nalPointer = UnsafeRawPointer(dataPointer.advanced(by: nalStart)).assumingMemoryBound(to: UInt8.self)
-            outputHandler(annexBPacket(bytes: nalPointer, count: nalLength))
+            appendAnnexBPacket(bytes: nalPointer, count: nalLength, to: &packet)
             offset += 4 + nalLength
         }
+
+        return true
     }
 
-    private func annexBPacket(bytes: UnsafePointer<UInt8>, count: Int) -> Data {
-        var packet = Data()
-        packet.reserveCapacity(Self.annexBStartCode.count + count)
+    private func appendAnnexBPacket(bytes: UnsafePointer<UInt8>, count: Int, to packet: inout Data) {
+        packet.reserveCapacity(packet.count + Self.annexBStartCode.count + count)
         packet.append(contentsOf: Self.annexBStartCode)
         packet.append(bytes, count: count)
-        return packet
     }
 }

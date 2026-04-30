@@ -16,6 +16,7 @@ protocol Decoding {
 }
 
 final class H264Decoder {
+    private static let maxQueuedDecodeOperations = 2 * 10
 
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
@@ -29,6 +30,7 @@ final class H264Decoder {
     init() {
         let queue = OperationQueue()
         queue.qualityOfService = .userInitiated
+        // H.264 access units must stay in order for the decompression session.
         queue.maxConcurrentOperationCount = 1
         queue.name = "by.sy.H264Decoder.decodeQueue"
         self.queue = queue
@@ -45,48 +47,71 @@ final class H264Decoder {
     
     func decode(_ data: Data) {
         guard data.count > 4 else { return }
+        StreamDiagnostics.shared.mark(.decodeRequested)
+        let nalUnits = Self.splitAnnexBNALUnits(in: data)
+        guard !nalUnits.isEmpty else { return }
+
+        if shouldDropNALUnits(nalUnits) {
+            StreamDiagnostics.shared.mark(.decodeDropped)
+            return
+        }
+
         queue.addOperation { [weak self] in
             guard let self, !self.queue.isSuspended else {
                 return
             }
-            self.decodeCore(data)
+            StreamDiagnostics.shared.mark(.decodeSubmitted)
+            self.decodeAccessUnit(nalUnits)
         }
     }
-    
-    private func decodeCore(_ data: Data) {
-        guard data.count > 4 else { return }
-        // Detect NAL type
-        let nalType = data[4] & 0x1F
-        debugPrint("📦 NAL type:", nalType)
-        
-        switch nalType {
-        case 7: // SPS
-            let newSPS = data.advanced(by: 4)
-            if sps != newSPS {
-                resetDecoder()
-                pps = nil
-            }
-            sps = newSPS
-            debugPrint("📡 SPS received:", newSPS.count)
-            createSessionFormatDescriptionOnNeed()
 
-        case 8: // PPS
-            let newPPS = data.advanced(by: 4)
-            if pps != newPPS {
-                resetDecoder()
-            }
-            pps = newPPS
-            debugPrint("📡 PPS received:", newPPS.count)
-            createSessionFormatDescriptionOnNeed()
-
-        default:
-            guard let session, let formatDescription else {
-                debugPrint("⏳ Waiting for decoder setup...")
-                return
-            }
-
-            Self.decodeFrame(data, session: session, formatDescription: formatDescription)
+    private func shouldDropNALUnits(_ nalUnits: [Data]) -> Bool {
+        guard !nalUnits.contains(where: Self.isPriorityNALUnit) else {
+            return false
         }
+
+        return queue.operationCount >= Self.maxQueuedDecodeOperations
+    }
+    
+    private func decodeAccessUnit(_ nalUnits: [Data]) {
+        var frameNALUnits = [Data]()
+        frameNALUnits.reserveCapacity(nalUnits.count)
+
+        for nalUnit in nalUnits {
+            guard nalUnit.count > 4 else { continue }
+            let nalType = nalUnit[4] & 0x1F
+
+            switch nalType {
+            case 7: // SPS
+                let newSPS = nalUnit.advanced(by: 4)
+                if sps != newSPS {
+                    resetDecoder()
+                    pps = nil
+                }
+                sps = newSPS
+                createSessionFormatDescriptionOnNeed()
+
+            case 8: // PPS
+                let newPPS = nalUnit.advanced(by: 4)
+                if pps != newPPS {
+                    resetDecoder()
+                }
+                pps = newPPS
+                createSessionFormatDescriptionOnNeed()
+
+            case 9: // AUD
+                continue
+
+            default:
+                frameNALUnits.append(nalUnit)
+            }
+        }
+
+        guard !frameNALUnits.isEmpty, let session, let formatDescription else {
+            return
+        }
+
+        Self.decodeFrame(frameNALUnits, session: session, formatDescription: formatDescription)
     }
 
     private func resetDecoder() {
@@ -135,7 +160,6 @@ final class H264Decoder {
                 )
                 
                 guard let formatDescription = Self.valueOnStatusSuccess(formatDescription, status: status) else {
-                    debugPrint("❌ Failed to create format description:", status)
                     return nil
                 }
                 
@@ -161,16 +185,23 @@ final class H264Decoder {
             outputCallback: &callback,
             decompressionSessionOut: &sessionOut
         )
-        debugPrint(sessionOut != nil ? "🎬 Created Decoder session" : "❌ Failed Decoder session")
         return Self.valueOnStatusSuccess(sessionOut, status: status)
     }
 
-    private static func decodeFrame(_ data: Data, session: VTDecompressionSession, formatDescription: CMFormatDescription) {
-        // Convert Annex-B → AVCC (replace start code with length)
+    private static func decodeFrame(_ nalUnits: [Data], session: VTDecompressionSession, formatDescription: CMFormatDescription) {
+        guard !nalUnits.isEmpty else { return }
+
+        // Convert Annex-B access unit → AVCC by length-prefixing each NAL in the frame.
         assert(!Thread.isMainThread)
-        var length = UInt32(data.count - 4).bigEndian
-        var buffer = Data(bytes: &length, count: 4)
-        buffer.append(data.advanced(by: 4))
+        var buffer = Data()
+        for nalUnit in nalUnits {
+            guard nalUnit.count > 4 else { continue }
+            var length = UInt32(nalUnit.count - 4).bigEndian
+            buffer.append(Data(bytes: &length, count: 4))
+            buffer.append(nalUnit.advanced(by: 4))
+        }
+
+        guard !buffer.isEmpty else { return }
 
         var blockBuffer: CMBlockBuffer?
         let status = CMBlockBufferCreateWithMemoryBlock(
@@ -230,13 +261,19 @@ final class H264Decoder {
             infoFlagsOut: &flags
         )
         
-        guard Self.valueOnStatusSuccess(flags, status: decodeStatus) != nil else { return }
+        guard Self.valueOnStatusSuccess(flags, status: decodeStatus) != nil else {
+            StreamDiagnostics.shared.mark(.decodeError)
+            return
+        }
     }
 
     private static let decompressionCallback: VTDecompressionOutputCallback = {
         (refCon, _, status, _, imageBuffer, _, _) in
-
-        guard let imageBuffer = valueOnStatusSuccess(imageBuffer, status: status), let refCon else { return }
+        guard let refCon else { return }
+        guard let imageBuffer = valueOnStatusSuccess(imageBuffer, status: status) else {
+            StreamDiagnostics.shared.mark(.decodeError)
+            return
+        }
 
         let decoder = Unmanaged<H264Decoder>.fromOpaque(refCon).takeUnretainedValue()
 
@@ -270,8 +307,31 @@ final class H264Decoder {
             sampleTiming: &timing,
             sampleBufferOut: &sampleBuffer
         )
-        
-        return Self.valueOnStatusSuccess(sampleBuffer, status:bufferStatus)
+
+        guard let sampleBuffer = Self.valueOnStatusSuccess(sampleBuffer, status: bufferStatus) else {
+            return nil
+        }
+
+        markDisplayImmediately(sampleBuffer)
+        return sampleBuffer
+    }
+
+    private static func markDisplayImmediately(_ sampleBuffer: CMSampleBuffer) {
+        guard let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true) else {
+            return
+        }
+
+        let mutableAttachments = unsafeDowncast(attachments, to: CFMutableArray.self)
+        guard CFArrayGetCount(mutableAttachments) > 0 else {
+            return
+        }
+
+        let attachment = unsafeBitCast(CFArrayGetValueAtIndex(mutableAttachments, 0), to: CFMutableDictionary.self)
+        CFDictionarySetValue(
+            attachment,
+            Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),
+            Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
+        )
     }
     
     private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus) -> T! {
@@ -284,11 +344,54 @@ final class H264Decoder {
         status.flatMap { valueOnStatusSuccess(value, status: $0) }
     }
 
-    private func handleDecodedFrame(_ pixelBuffer: CVImageBuffer) {
-        
-        guard let sampleBuffer = Self.makeSampleBuffer(from: pixelBuffer) else { return }
+    private static func splitAnnexBNALUnits(in data: Data) -> [Data] {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 5 else {
+            return []
+        }
 
+        var startOffsets = [Int]()
+        var index = 0
+        while index <= bytes.count - 4 {
+            if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 0, bytes[index + 3] == 1 {
+                startOffsets.append(index)
+                index += 4
+            } else {
+                index += 1
+            }
+        }
+
+        guard !startOffsets.isEmpty else {
+            return []
+        }
+
+        var nalUnits = [Data]()
+        nalUnits.reserveCapacity(startOffsets.count)
+
+        for (offsetIndex, startOffset) in startOffsets.enumerated() {
+            let endOffset = offsetIndex + 1 < startOffsets.count ? startOffsets[offsetIndex + 1] : bytes.count
+            guard endOffset - startOffset > 4 else {
+                continue
+            }
+
+            nalUnits.append(data.subdata(in: startOffset..<endOffset))
+        }
+
+        return nalUnits
+    }
+
+    private static func isPriorityNALUnit(_ data: Data) -> Bool {
+        guard data.count > 4 else {
+            return false
+        }
+
+        let nalType = data[4] & 0x1F
+        return nalType == 7 || nalType == 8 || nalType == 5
+    }
+
+    private func handleDecodedFrame(_ pixelBuffer: CVImageBuffer) {
+        guard let sampleBuffer = Self.makeSampleBuffer(from: pixelBuffer) else { return }
+        StreamDiagnostics.shared.mark(.decodeOutput)
         decodedFramePublisher.send(sampleBuffer)
-        
     }
 }

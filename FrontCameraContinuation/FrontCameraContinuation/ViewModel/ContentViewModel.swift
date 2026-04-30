@@ -73,7 +73,7 @@ final class ContentViewModel {
         self.defaults = defaults
         host = defaults.string(forKey: Constants.hostKey) ?? Constants.defaultHost
         port = defaults.string(forKey: Constants.portKey) ?? Constants.defaultPortString
-        streamSize = defaults.object(forKey: Constants.streamSize) != nil ? StreamSize(rawValue: defaults.integer(forKey: Constants.streamSize)) ?? .full : .full
+        streamSize = defaults.object(forKey: Constants.streamSize) != nil ? StreamSize(rawValue: defaults.integer(forKey: Constants.streamSize)) ?? .hd720 : .hd720
         cameraPosition = defaults.object(forKey: Constants.cameraPosition) != nil ? CameraPosition(rawValue: defaults.integer(forKey: Constants.cameraPosition)) ?? .front : .front
         bind()
     }

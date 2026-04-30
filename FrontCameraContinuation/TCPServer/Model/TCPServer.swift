@@ -13,6 +13,56 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 
+final class StreamDiagnostics {
+    static let shared = StreamDiagnostics()
+
+    enum Counter: String, CaseIterable {
+        case tcpReceived = "tcp.received"
+        case decodeRequested = "decode.requested"
+        case decodeDropped = "decode.dropped"
+        case decodeSubmitted = "decode.submitted"
+        case decodeOutput = "decode.output"
+        case decodeError = "decode.error"
+        case previewEnqueued = "preview.enqueued"
+        case previewDropped = "preview.dropped"
+    }
+
+    private let lock = NSLock()
+    private var counts = [Counter: Int]()
+    private var lastFlush = Date()
+
+    private init() {}
+
+    func mark(_ counter: Counter, amount: Int = 1) {
+        lock.lock()
+        counts[counter, default: 0] += amount
+
+        let now = Date()
+        let elapsed = now.timeIntervalSince(lastFlush)
+        guard elapsed >= 1 else {
+            lock.unlock()
+            return
+        }
+
+        let snapshot = Counter.allCases.compactMap { counter -> String? in
+            guard let count = counts[counter], count > 0 else {
+                return nil
+            }
+            return "\(counter.rawValue)=\(count)/s"
+        }
+
+        counts.removeAll(keepingCapacity: true)
+        lastFlush = now
+        lock.unlock()
+
+        guard !snapshot.isEmpty else {
+            return
+        }
+
+        debugPrint("STREAM STATS", snapshot.joined(separator: " "))
+    }
+}
+
 final class ServerManager {
     private let server = TCPServer()
     private let sinkClient = VirtualCameraSinkClient()
@@ -46,6 +96,7 @@ final class ServerManager {
             }
 
         server.onFrame = { [weak self] data in
+            StreamDiagnostics.shared.mark(.tcpReceived)
             self?.decoder.decode(data)
         }
 
@@ -258,8 +309,9 @@ private final class TCPServer {
     }
 
     private func readSize(_ connection: NWConnection) {
-        debugPrint("📥 Waiting for frame size...")
+        debugPrint("!!! readSize function start \(Date().timeIntervalSince1970)")
         connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { sizeData, _, _, error in
+            debugPrint("!!! readSize function end \(Date().timeIntervalSince1970)")
             guard let sizeData, sizeData.count == 4 else {
                 debugPrint("❌ Failed to read size:", error ?? "unknown")
                 self.close(connection, cancel: true)
@@ -272,15 +324,16 @@ private final class TCPServer {
     }
 
     private func readFrame(_ connection: NWConnection, expectedSize: Int, buffer: Data) {
+        debugPrint("!!! readFrame function start \(Date().timeIntervalSince1970)")
         connection.receive(minimumIncompleteLength: 1, maximumLength: expectedSize - buffer.count) {
             chunk, _, _, error in
+            debugPrint("!!! readFrame function end \(Date().timeIntervalSince1970)")
             guard let chunk, !chunk.isEmpty else {
                 debugPrint("❌ Failed to read frame:", error ?? "unknown")
                 self.close(connection, cancel: true)
                 return
             }
-            
-            debugPrint("📦 Receiving frame chunk:", chunk.count)
+
             var newBuffer = buffer
             newBuffer.append(chunk)
 
@@ -290,6 +343,7 @@ private final class TCPServer {
             } else {
                 // ✅ full frame received
                 self.scheduleInactivityTimeout(for: connection)
+                debugPrint("!!! onFrame accumulated \(Date().timeIntervalSince1970)")
                 self.onFrame?(newBuffer)
 
                 // read next frame
