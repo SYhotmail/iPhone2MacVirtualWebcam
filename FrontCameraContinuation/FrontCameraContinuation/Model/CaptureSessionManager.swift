@@ -136,7 +136,7 @@ final class CaptureSessionManager {
             session.addOutput(output)
         }
         videoOutput = output
-        configureRotationCoordinator(for: device)
+        rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
     }
 
     private func scheduleChangeSession(shouldRun: Bool) {
@@ -155,25 +155,19 @@ final class CaptureSessionManager {
         self.sessionChangeWorkItem = sessionChangeWorkItem
         DispatchQueue.global(qos: .userInitiated).async(execute: sessionChangeWorkItem)
     }
+    
+    private var videoOutputConnection: AVCaptureConnection? {
+        videoOutput?.connection(with: .video)
+    }
 
     private func configureVideoConnection() {
-        guard let videoConnection = videoOutput?.connection(with: .video) else { return }
-
+        guard let videoConnection = videoOutputConnection else { return }
+        
         if videoConnection.isVideoMirroringSupported, !videoConnection.isVideoMirrored {
             videoConnection.isVideoMirrored = true
         }
 
-        applyRotationAngle(to: videoConnection)
-    }
-
-    private func beginOrientationUpdates() {
-        orientationCancellable = rotationCoordinator?.publisher(for: \.videoRotationAngleForHorizonLevelCapture)
-            .sink { [weak self] _ in
-                self?.updateVideoConnectionRotation()
-            }
-        if rotationCoordinator != nil {
-            updateVideoConnectionRotation()
-        }
+        applyRotationOnVideo()
     }
 
     private func beginSessionNotifications() {
@@ -204,24 +198,27 @@ final class CaptureSessionManager {
             }
             .store(in: &notificationCancellables)
     }
-
-    private func configureRotationCoordinator(for device: AVCaptureDevice) {
-        rotationCoordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
-    }
-
-    private func updateVideoConnectionRotation() {
-        captureQueue.async { [weak self] in
-            guard let self,
-                  let videoConnection = self.videoOutput?.connection(with: .video) else { return }
-
-            self.applyRotationAngle(to: videoConnection)
+    
+    // MARK: - Video Orientation
+    
+    private func beginOrientationUpdates() {
+        let block: () -> Void = { [weak self] in
+            self?.applyRotationOnVideo()
         }
+        let queue = DispatchQueue.main
+        block()
+        
+        orientationCancellable = rotationCoordinator?.publisher(for: \.videoRotationAngleForHorizonLevelCapture)
+            .receive(on: queue)
+            .map {_ in () }
+            .sink(receiveValue: block)
     }
 
-    private func applyRotationAngle(to videoConnection: AVCaptureConnection) {
-        guard let rotationCoordinator else { return }
+    private func applyRotationOnVideo() {
+        guard let videoConnection = videoOutputConnection, let rotationCoordinator else { return }
         let angle = rotationCoordinator.videoRotationAngleForHorizonLevelCapture
         guard videoConnection.isVideoRotationAngleSupported(angle), videoConnection.videoRotationAngle != angle else { return }
+        debugPrint("!!! Apply rotation to video: \(angle)")
         videoConnection.videoRotationAngle = angle
     }
 }
