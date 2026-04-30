@@ -2,9 +2,10 @@ internal import AVFoundation
 import CoreMedia
 import CoreMediaIO
 import OSLog
+import Synchronization
 
 final class VirtualCameraSinkClient {
-    private let lock = NSLock()
+    private let lock = Mutex(())
     private let logger = Logger(subsystem: "by.sy.TCPServer", category: "virtual-camera-sink")
 
     private var deviceID: CMIODeviceID?
@@ -13,17 +14,20 @@ final class VirtualCameraSinkClient {
     private var readyToEnqueue = true
 
     func start() {
-        logger.error("Starting virtual camera sink client")
+        logger.debug("Starting virtual camera sink client")
         ensureVideoAccessAndConnect()
     }
 
     func stop() {
-        lock.lock()
-        defer { lock.unlock() }
-
+        lock.withLock { _ in
+            self.stopCore()
+        }
+    }
+    
+    private func stopCore() {
         if let deviceID, let sinkStreamID {
             CMIODeviceStopStream(deviceID, sinkStreamID)
-            logger.error("Stopped sink stream \(sinkStreamID)")
+            logger.debug("Stopped sink stream \(sinkStreamID)")
         }
 
         deviceID = nil
@@ -33,67 +37,75 @@ final class VirtualCameraSinkClient {
     }
 
     func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        lock.lock()
-        defer { lock.unlock() }
-
         connectIfNeeded()
-
-        guard let sinkQueue else { return }
+        lock.withLock { _ in
+            self.enqueueCore(sampleBuffer)
+        }
+    }
+    
+    private func enqueueCore(_ sampleBuffer: CMSampleBuffer) {
         guard readyToEnqueue else { return }
+        guard let sinkQueue else { return }
         guard CMSimpleQueueGetCount(sinkQueue) < CMSimpleQueueGetCapacity(sinkQueue) else { return }
 
         readyToEnqueue = false
         let retainedSampleBuffer = Unmanaged.passRetained(sampleBuffer)
         let status = CMSimpleQueueEnqueue(sinkQueue, element: retainedSampleBuffer.toOpaque())
-        if status != noErr {
+        let success = status == noErr
+        readyToEnqueue = !success
+        guard success else {
             readyToEnqueue = true
             retainedSampleBuffer.release()
-            logger.error("Failed to enqueue sample buffer, status=\(status)")
-        } else {
-            logger.error("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
+            logger.debug("Failed to enqueue sample buffer, status=\(status)")
+            return
+        }
+        
+        debugPrint("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
+        logger.debug("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
+    }
+    
+    private func connectIfNeeded() {
+        lock.withLock { _ in
+            self.connectIfNeededCore()
         }
     }
 
     private func ensureVideoAccessAndConnect() {
-        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        let mediaType = AVMediaType.video
+        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
         case .authorized:
-            lock.lock()
             connectIfNeeded()
-            lock.unlock()
         case .notDetermined:
-            logger.error("Requesting camera access for virtual camera discovery")
-            AVCaptureDevice.requestAccess(for: .video) { [weak self] granted in
-                guard let self else { return }
-                if granted {
-                    self.logger.error("Camera access granted")
-                } else {
-                    self.logger.error("Camera access denied")
+            logger.debug("Requesting camera access for virtual camera discovery")
+            AVCaptureDevice.requestAccess(for: mediaType) { [weak self] granted in
+                guard let self, granted else {
+                    self?.logger.debug("Camera access denied")
                     return
                 }
-                self.lock.lock()
+                self.logger.debug("Camera access granted")
+                
                 self.connectIfNeeded()
-                self.lock.unlock()
             }
         case .denied:
-            logger.error("Camera access denied")
+            logger.debug("Camera access denied")
         case .restricted:
-            logger.error("Camera access restricted")
+            logger.debug("Camera access restricted")
         @unknown default:
-            logger.error("Camera access status unknown")
+            logger.debug("Camera access status unknown")
         }
     }
 
-    private func connectIfNeeded() {
+    private func connectIfNeededCore() {
         guard sinkQueue == nil else { return }
-        logger.error("Attempting sink connection")
+        logger.debug("Attempting sink connection")
         guard let match = findVirtualCamera() else {
-            logger.error("Unable to find a virtual camera device for sink connection")
+            logger.debug("Unable to find a virtual camera device for sink connection")
             return
         }
         let device = match.device
         let cmioDeviceID = match.deviceID
         let sinkStreamID = match.sinkStreamID
-        logger.error("Resolved sink target deviceID=\(cmioDeviceID) streamID=\(sinkStreamID) name=\(device.localizedName, privacy: .public)")
+        logger.debug("Resolved sink target deviceID=\(cmioDeviceID) streamID=\(sinkStreamID) name=\(device.localizedName, privacy: .public)")
 
         let queuePointer = UnsafeMutablePointer<Unmanaged<CMSimpleQueue>?>.allocate(capacity: 1)
         queuePointer.initialize(to: nil)
@@ -114,17 +126,17 @@ final class VirtualCameraSinkClient {
             queuePointer
         )
 
-        logger.error("CMIOStreamCopyBufferQueue returned status=\(status)")
+        logger.debug("CMIOStreamCopyBufferQueue returned status=\(status)")
         guard status == noErr, let unmanagedQueue = queuePointer.pointee else {
-            logger.error("CMIOStreamCopyBufferQueue failed, status=\(status)")
+            logger.debug("CMIOStreamCopyBufferQueue failed, status=\(status)")
             return
         }
 
         let queue = unmanagedQueue.takeUnretainedValue()
         let startStatus = CMIODeviceStartStream(cmioDeviceID, sinkStreamID)
-        logger.error("CMIODeviceStartStream returned status=\(startStatus) for sink stream \(sinkStreamID)")
+        logger.debug("CMIODeviceStartStream returned status=\(startStatus) for sink stream \(sinkStreamID)")
         guard startStatus == noErr else {
-            logger.error("CMIODeviceStartStream failed for sink stream \(sinkStreamID)")
+            logger.debug("CMIODeviceStartStream failed for sink stream \(sinkStreamID)")
             return
         }
 
@@ -132,14 +144,14 @@ final class VirtualCameraSinkClient {
         self.sinkStreamID = sinkStreamID
         self.sinkQueue = queue
         self.readyToEnqueue = true
-        logger.error("Connected sink client to device \(cmioDeviceID), sink stream \(sinkStreamID), name=\(device.localizedName, privacy: .public)")
+        logger.debug("Connected sink client to device \(cmioDeviceID), sink stream \(sinkStreamID), name=\(device.localizedName, privacy: .public)")
     }
 
     private func markReadyToEnqueue() {
-        lock.lock()
-        readyToEnqueue = true
-        lock.unlock()
-        logger.error("Sink stream is ready for another sample buffer")
+        lock.withLock { _ in
+            readyToEnqueue = true
+        }
+        logger.debug("Sink stream is ready for another sample buffer")
     }
 
     private func findDevice(named name: String) -> AVCaptureDevice? {
@@ -156,7 +168,7 @@ final class VirtualCameraSinkClient {
         if let device = findDevice(named: VirtualCameraConfiguration.deviceName),
            let deviceID = getCMIODeviceID(uid: device.uniqueID),
            let sinkStreamID = getSinkStreamID(deviceID: deviceID) {
-            logger.error("Found virtual camera by configured name \(device.localizedName, privacy: .public)")
+            logger.debug("Found virtual camera by configured name \(device.localizedName, privacy: .public)")
             return (device, deviceID, sinkStreamID)
         }
 
@@ -166,18 +178,18 @@ final class VirtualCameraSinkClient {
             position: .unspecified
         )
 
-        logger.error("Scanning \(discoverySession.devices.count) external video device(s) for sink stream")
+        logger.debug("Scanning \(discoverySession.devices.count) external video device(s) for sink stream")
         for device in discoverySession.devices {
-            logger.error("Inspecting device candidate name=\(device.localizedName, privacy: .public) uid=\(device.uniqueID, privacy: .public)")
+            logger.debug("Inspecting device candidate name=\(device.localizedName, privacy: .public) uid=\(device.uniqueID, privacy: .public)")
             guard let deviceID = getCMIODeviceID(uid: device.uniqueID),
                   let streams = getStreamIDs(deviceID: deviceID),
                   streams.count >= 2,
                   let sinkStreamID = streams.last else {
-                logger.error("Rejected device candidate \(device.localizedName, privacy: .public)")
+                logger.debug("Rejected device candidate \(device.localizedName, privacy: .public)")
                 continue
             }
 
-            logger.error("Falling back to virtual camera candidate \(device.localizedName, privacy: .public) with \(streams.count) streams")
+            logger.debug("Falling back to virtual camera candidate \(device.localizedName, privacy: .public) with \(streams.count) streams")
             return (device, deviceID, sinkStreamID)
         }
 
@@ -200,7 +212,7 @@ final class VirtualCameraSinkClient {
             nil,
             &dataSize
         ) == noErr else {
-            logger.error("Failed to fetch CMIO device list size")
+            logger.debug("Failed to fetch CMIO device list size")
             return nil
         }
 
@@ -216,7 +228,7 @@ final class VirtualCameraSinkClient {
             &dataUsed,
             &deviceIDs
         ) == noErr else {
-            logger.error("Failed to fetch CMIO device list")
+            logger.debug("Failed to fetch CMIO device list")
             return nil
         }
 
@@ -246,12 +258,12 @@ final class VirtualCameraSinkClient {
             }
 
             if deviceUID as String == uid {
-                logger.error("Matched AVCapture device uid=\(uid, privacy: .public) to CMIO device \(deviceID)")
+                logger.debug("Matched AVCapture device uid=\(uid, privacy: .public) to CMIO device \(deviceID)")
                 return deviceID
             }
         }
 
-        logger.error("No CMIO device matched uid=\(uid, privacy: .public)")
+        logger.debug("No CMIO device matched uid=\(uid, privacy: .public)")
         return nil
     }
 
@@ -269,7 +281,7 @@ final class VirtualCameraSinkClient {
         var dataUsed: UInt32 = 0
 
         guard CMIOObjectGetPropertyDataSize(deviceID, &address, 0, nil, &dataSize) == noErr else {
-            logger.error("Failed to fetch stream list size for device \(deviceID)")
+            logger.debug("Failed to fetch stream list size for device \(deviceID)")
             return nil
         }
 
@@ -285,11 +297,11 @@ final class VirtualCameraSinkClient {
             &dataUsed,
             &streamIDs
         ) == noErr else {
-            logger.error("Failed to fetch stream list for device \(deviceID)")
+            logger.debug("Failed to fetch stream list for device \(deviceID)")
             return nil
         }
 
-        logger.error("Device \(deviceID) exposes \(streamIDs.count) stream(s)")
+        logger.debug("Device \(deviceID) exposes \(streamIDs.count) stream(s)")
         return streamIDs
     }
 }
