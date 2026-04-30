@@ -1,6 +1,9 @@
 import SwiftUI
 import AVFoundation
 import Combine
+#if os(iOS)
+import UIKit
+#endif
 
 @Observable
 final class ContentViewModel {
@@ -63,7 +66,14 @@ final class ContentViewModel {
             preparePreview()
         }
     }
-    private(set)var isStreaming = false
+    private(set)var isStreaming = false {
+        didSet {
+            guard oldValue != isStreaming else {
+                return
+            }
+            Self.changeIdleTimer(isStreaming)
+        }
+    }
     
     init(cameraStreamer: CameraStreamer = .init(), defaults: UserDefaults = .standard) {
         self.cameraStreamer = cameraStreamer
@@ -106,14 +116,12 @@ final class ContentViewModel {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let portValue = UInt16(port) ?? Constants.defaultPort
         
-        cameraStreamer.startStreaming(
+        isStreaming = cameraStreamer.startStreaming(
             host: trimmedHost,
             port: portValue,
             position: cameraPosition.avPosition,
             preset: streamSize.sessionPreset
         )
-        
-        isStreaming = true
     }
 
     func stopStreaming() {
@@ -141,6 +149,13 @@ final class ContentViewModel {
             cameraPosition = .front
         }
     }
+    
+
+    private static func changeIdleTimer(_ isIdleTimerDisabled: Bool) {
+#if os(iOS)
+        Task { @MainActor in
+            UIApplication.shared.isIdleTimerDisabled = isIdleTimerDisabled
+        }
+#endif
+    }
 }
-
-
