@@ -10,25 +10,43 @@
 import UIKit
 import Combine
 
-final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+nonisolated
+final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOutputSampleBufferDelegate {
     private let captureSessionManager = CaptureSessionManager()
     private let connectionManager = ConnectionManager()
     private let encoder = H264Encoder()
     private var shouldAutoResume = false
-
+    let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
+    
     var session: AVCaptureSession {
         captureSessionManager.session
     }
 
-    var isConnectedPublisher: CurrentValueSubject<Bool, Never> {
-        connectionManager.isConnectedPublisher
-    }
-
     override init() {
         super.init()
+        bind()
+    }
+    
+    private func bind() {
+        bindConnectionManager()
+        
+        bindCaptureSessionManager()
+        
+        encoder.outputHandler = { [weak self] packet in
+            self?.send(packet)
+        }
+    }
+    
+    private func bindConnectionManager() {
         connectionManager.onConnectionFailed = { [weak self] in
             self?.stopStreaming()
         }
+        connectionManager.onConnectionChaged = { [weak self] isConnected in
+            self?.isConnectedPublisher.value = isConnected
+        }
+    }
+    
+    private func bindCaptureSessionManager() {
         captureSessionManager.onSessionInterrupted = { [weak self] reason in
             self?.handleSessionInterrupted(reason)
         }
@@ -37,10 +55,6 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
         captureSessionManager.onSessionRuntimeError = { [weak self] error in
             self?.handleSessionRuntimeError(error)
-        }
-        
-        encoder.outputHandler = { [weak self] packet in
-            self?.send(packet)
         }
     }
 
@@ -69,12 +83,11 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
     
     func stopStreaming() {
         shouldAutoResume = false
-        encoderInvalidate()
-        connectionManager.disconnect()
+        disconnect()
     }
 
     private func send(_ data: Data) {
-        connectionManager.sendPacketized(data)
+        connectionManager.send(data)
     }
 
     private func handleSessionInterrupted(_ reason: AVCaptureSession.InterruptionReason?) {
@@ -85,9 +98,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         }
 
         guard shouldAutoResume else { return }
-        
-        encoderInvalidate()
-        connectionManager.disconnect()
+        disconnect()
     }
 
     private func handleSessionInterruptionEnded() {
@@ -99,9 +110,7 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
         debugPrint("Capture session runtime error: \(String(describing: error))")
         guard shouldAutoResume else { return }
         
-        encoderInvalidate()
-        connectionManager.disconnect()
-        shouldAutoResume = false
+        stopStreaming()
     }
 
     private func restartStreamingAfterCaptureRecovery() {
@@ -112,11 +121,15 @@ final class CameraStreamer: NSObject, AVCaptureVideoDataOutputSampleBufferDelega
 
         try? captureSessionManager.reconfigureCurrent(delegate: self)
     }
+    
+    private func disconnect() {
+        encoderInvalidate()
+        connectionManager.disconnect()
+    }
 
     private func stopCaptureAndConnection() {
         captureSessionManager.stopRunning()
-        encoderInvalidate()
-        connectionManager.disconnect()
+        disconnect()
     }
 
     // MARK: - Capture delegate

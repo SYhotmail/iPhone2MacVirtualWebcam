@@ -1,5 +1,6 @@
 import CoreMedia
 
+nonisolated
 enum VirtualCameraConfiguration {
     static let extensionBundleIdentifier = "by.sy.TCPServer.VirtualCameraExtension"
     static let deviceName = "Remote Camera"

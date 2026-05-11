@@ -2,7 +2,8 @@ import Combine
 import Foundation
 import Network
 
-final class ConnectionManager {
+nonisolated
+final class ConnectionManager: @unchecked Sendable {
     private var connection: NWConnection? {
         didSet {
             guard let oldValue, oldValue !== connection else {
@@ -14,9 +15,21 @@ final class ConnectionManager {
     private var currentHost: String?
     private var currentPort: UInt16?
 
-    let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
-    var onConnectionFailed: (() -> Void)?
-
+    private var isConnected = false {
+        didSet {
+            guard oldValue != isConnected else { return }
+            onConnectionChaged?(isConnected)
+        }
+    }
+    
+    var onConnectionFailed: (@Sendable () -> Void)!
+    var onConnectionChaged: (@Sendable (Bool) -> Void)! {
+        didSet {
+            guard let onConnectionChaged else { return }
+            onConnectionChaged(isConnected)
+        }
+    }
+    
     @discardableResult
     func connect(host: String, port: UInt16) -> Bool {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
@@ -37,11 +50,13 @@ final class ConnectionManager {
                 isReady = true
             } else {
                 isReady = false
-                if case .failed = newState {
-                    self?.onConnectionFailed?()
-                }
             }
-            self?.isConnectedPublisher.value = isReady
+            
+            guard let self else { return }
+            if case .failed = newState {
+                self.onConnectionFailed?()
+            }
+            self.isConnected = isReady
         }
         connection.pathUpdateHandler = { newPath in
             debugPrint("!!! New Path \(newPath.debugDescription)")
@@ -68,10 +83,10 @@ final class ConnectionManager {
 
     func disconnect() {
         connection = nil
-        isConnectedPublisher.value = false
+        isConnected = false
     }
 
-    func sendPacketized(_ data: Data) {
+    func send(_ data: Data) {
         let packet = packetizedData(data)
         connection?.send(content: packet, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ error in
             guard let error else { return }

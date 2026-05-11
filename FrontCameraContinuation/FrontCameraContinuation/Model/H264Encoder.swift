@@ -2,6 +2,7 @@
 import VideoToolbox
 import QuartzCore
 
+nonisolated
 final class H264Encoder {
     typealias OutputHandler = (Data) -> Void
 

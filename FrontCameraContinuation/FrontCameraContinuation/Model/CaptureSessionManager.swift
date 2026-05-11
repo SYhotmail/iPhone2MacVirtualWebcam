@@ -3,6 +3,7 @@ import Combine
 import UIKit
 import OSLog
 
+nonisolated
 final class CaptureSessionManager {
     let session = AVCaptureSession()
     
@@ -36,7 +37,8 @@ final class CaptureSessionManager {
     private let logger: Logger?
     let preferedFrameDuration: CMTime
     
-    init(preferedFrameDuration: CMTime = VirtualCameraConfiguration.frameDuration, logger: Logger? = { Bundle.main.bundleIdentifier.flatMap { .init(subsystem: $0, category: "capture.session.manager") } }()) {
+    init(preferedFrameDuration: CMTime = VirtualCameraConfiguration.frameDuration,
+         logger: Logger? = { Bundle.main.bundleIdentifier.flatMap { .init(subsystem: $0, category: "capture.session.manager") } }()) {
         captureQueue = .init(label: "camera.session.manager", qos: .userInitiated)
         self.preferedFrameDuration = preferedFrameDuration
         self.logger = logger
