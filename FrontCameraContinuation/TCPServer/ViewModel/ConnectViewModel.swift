@@ -37,24 +37,15 @@ final class ConnectViewModel {
     @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
 
-    init(manager: ServerManager,
+    init(manager: ServerManager = ServerManager(),
          ipProvider: IPAddressProvidable = LocalNetworkAddressProvider(),
-         installer: VirtualCameraInstaller,
+         installer: VirtualCameraInstaller = VirtualCameraInstaller(),
          listenPort: UInt16 = 9999) {
         self.ipProvider = ipProvider
         self.listenPort = listenPort
         self.manager = manager
         self.installer = installer
         bind()
-    }
-
-    convenience init(listenPort: UInt16 = 9999) {
-        self.init(
-            manager: ServerManager(),
-            ipProvider: LocalNetworkAddressProvider(),
-            installer: VirtualCameraInstaller(),
-            listenPort: listenPort
-        )
     }
 
     var primaryAddressText: String {

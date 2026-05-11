@@ -9,7 +9,7 @@ struct IPVersionType: OptionSet {
     static let ipv6 = IPVersionType(rawValue: 1 << 1)
 }
 
-protocol IPAddressProvidable {
+protocol IPAddressProvidable: Sendable {
     @concurrent
     func getIPAddresses(ipVersion: IPVersionType) async -> [Int: [String]]
     

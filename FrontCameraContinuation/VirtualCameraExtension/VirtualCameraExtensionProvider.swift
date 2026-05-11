@@ -1,6 +1,6 @@
 import Foundation
 import CoreMedia
-import CoreMediaIO
+@preconcurrency import CoreMediaIO
 import IOKit.audio
 import OSLog
 

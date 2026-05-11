@@ -9,8 +9,10 @@
 import VideoToolbox
 import QuartzCore
 import Combine
+import Synchronization
 
-final class StreamDiagnostics {
+nonisolated
+final class StreamDiagnostics: @unchecked Sendable {
     static let shared = StreamDiagnostics()
 
     enum Counter: String, CaseIterable {
@@ -24,20 +26,18 @@ final class StreamDiagnostics {
         case previewDropped = "preview.dropped"
     }
 
-    private let lock = NSLock()
+    private let lock = Mutex(())
     private var counts = [Counter: Int]()
     private var lastFlush = Date()
 
     private init() {}
 
-    func mark(_ counter: Counter, amount: Int = 1) {
-        lock.lock()
+    private func markCore(_ counter: Counter, amount: Int) {
         counts[counter, default: 0] += amount
 
         let now = Date()
         let elapsed = now.timeIntervalSince(lastFlush)
         guard elapsed >= 1 else {
-            lock.unlock()
             return
         }
 
@@ -50,13 +50,19 @@ final class StreamDiagnostics {
 
         counts.removeAll(keepingCapacity: true)
         lastFlush = now
-        lock.unlock()
 
         guard !snapshot.isEmpty else {
             return
         }
 
         debugPrint("STREAM STATS", snapshot.joined(separator: " "))
+    }
+    
+    func mark(_ counter: Counter, amount: Int = 1) {
+        lock.withLock { _ in
+            self.markCore(counter, amount: amount)
+        }
+        
     }
 }
 
@@ -66,7 +72,8 @@ protocol Decoding {
     func reset()
 }
 
-final class H264Decoder {
+nonisolated
+final class H264Decoder: @unchecked Sendable {
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
 

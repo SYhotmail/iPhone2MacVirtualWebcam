@@ -13,146 +13,40 @@ import VideoToolbox
 import CoreMedia
 import CoreVideo
 
-protocol NetworkConnectionStateProvable {
-    var error: NWError? { get }
-    var isConnected: Bool { get }
-}
-
-extension NWConnection.State : NetworkConnectionStateProvable, @retroactive CustomDebugStringConvertible {
-    var error: NWError? {
-        switch self {
-        case .failed(let error):
-            return error
-        case .waiting(let error):
-            return error
-        default:
-            return nil
-        }
-    }
-    
-    var isConnected: Bool {
-        if case .ready = self {
-            return true
-        }
-        
-        return false
-    }
-    
-    public var debugDescription: String {
-        switch self {
-        case .ready:
-            return "Ready"
-        case .cancelled:
-            return "Cancelled"
-        case .failed(let error):
-            return "Failed: \(error)"
-        case .waiting(let error):
-            return "Waiting: \(error)"
-        case .setup:
-            return "Setup"
-        case .preparing:
-            return "Preparing"
-        @unknown default:
-            return "Unknown"
-        }
-    }
-}
-
-extension NWListener.State: NetworkConnectionStateProvable, @retroactive CustomDebugStringConvertible {
-    var error: NWError? {
-        switch self {
-        case .failed(let error):
-            return error
-        case .waiting(let error):
-            return error
-        default:
-            return nil
-        }
-    }
-    
-    var isConnected: Bool {
-        if case .ready = self {
-            return true
-        }
-        
-        return false
-    }
-    
-    public var debugDescription: String {
-        switch self {
-        case .ready:
-            return "Ready"
-        case .cancelled:
-            return "Cancelled"
-        case .failed(let error):
-            return "Failed: \(error)"
-        case .waiting(let error):
-            return "Waiting: \(error)"
-        case .setup:
-            return "Setup"
-        @unknown default:
-            return "Unknown"
-        }
-    }
-}
-
-final class TCPServer {
+nonisolated
+final class TCPServer: @unchecked Sendable {
 
     var onFrame: ((Data) -> Void)?
     var onStreamUnavailable: (() -> Void)?
     
-    private var listener: NWListener!
+    private var listener: NWListener! {
+        didSet {
+            guard let oldValue, oldValue !== listener else {
+                return
+            }
+            oldValue.cancel()
+        }
+    }
     
     private var connections = [NWConnection]()
     private var inactivityTimers = [ObjectIdentifier: DispatchWorkItem]()
     private let inactivityTimeout: TimeInterval = 2
-    let connectionStates = [CurrentValueSubject<NWConnection.State, Never>].init(repeating: .init(.setup), count: 1)
+    let connectionStates = CurrentValueSubject<NWConnection.State, Never>(.setup)
     let listenerState = CurrentValueSubject<NWListener.State, Never>(.setup)
+    
+    let connectionQueue = DispatchQueue.global(qos: .userInitiated)
     
     let lock = NSRecursiveLock()
     
     func start(port: UInt16) throws {
-        let listener = try NWListener(using: .tcp, on: NWEndpoint.Port(rawValue: port)!)
+        guard let portValue = NWEndpoint.Port(rawValue: port) else {
+            throw NSError(domain: "tcp-server", code: .min, userInfo: [NSLocalizedFailureErrorKey: "Invalid port \(port)"])
+        }
         
+        let listener = try NWListener(using: .tcp, on: portValue)
+        listener.newConnectionLimit = 1 // limit one?
         listener.newConnectionHandler = { [weak self] connection in
-            connection.stateUpdateHandler = { state in
-                debugPrint("Connection state \(state)")
-                guard let self else { return }
-                self.lock.lock()
-                defer {
-                    self.lock.unlock()
-                }
-                
-                self.connectionStates.last!.value = connection.state
-                
-                switch state {
-                    case .ready:
-                        self.scheduleInactivityTimeout(for: connection)
-                        self.receive(connection)
-
-                    case .waiting(let error):
-                        debugPrint("⏳ Connection waiting:", error)
-                        self.close(connection, cancel: true)
-
-                    case .failed(let error):
-                        debugPrint("❌ Connection failed:", error)
-                        self.close(connection, cancel: false)
-
-                    case .cancelled:
-                        debugPrint("🔌 Connection cancelled")
-                        self.close(connection, cancel: false)
-                    default:
-                        break
-                    }
-            }
-            
-            guard let self else { return }
-            self.lock.withLock {
-                self.cancelConnections(force: true)
-                self.connections.append(connection)
-            }
-            connection.start(queue: .global(qos: .userInitiated))
-            //self.receive(connection)
+            self?.handleNewConnection(connection)
         }
         
         listener.stateUpdateHandler = { [weak self] state in
@@ -161,7 +55,54 @@ final class TCPServer {
         }
 
         self.listener = listener
-        listener.start(queue: .global(qos: .userInitiated))
+        listener.start(queue: connectionQueue)
+    }
+    
+    private func handleConnectionStateUpdate(_ state: NWConnection.State, for connection: NWConnection) {
+        debugPrint("Connection state \(state)")
+        self.lock.lock()
+        defer {
+            self.lock.unlock()
+        }
+        
+        connectionStates.value = connection.state
+        var cancel: Bool?
+        switch state {
+            case .ready:
+                scheduleInactivityTimeout(for: connection)
+                receive(connection)
+            case .waiting(let error):
+                debugPrint("⏳ Connection waiting:", error)
+                cancel = true
+            case .failed(let error):
+                debugPrint("❌ Connection failed:", error)
+                cancel = false
+            case .cancelled:
+                debugPrint("🔌 Connection cancelled")
+                cancel = false
+            default:
+                break
+        }
+        
+        if let cancel {
+            close(connection, cancel: cancel)
+        }
+    }
+    
+    private func bindToConnection(_ connection: NWConnection) {
+        connection.stateUpdateHandler = { [weak connection, weak self] state in
+            guard let self, let connection else { return }
+            self.handleConnectionStateUpdate(state, for: connection)
+        }
+    }
+    
+    private func handleNewConnection(_ connection: NWConnection) {
+        lock.withLock {
+            cancelConnections(force: true)
+            connections.append(connection)
+        }
+        bindToConnection(connection)
+        connection.start(queue: connectionQueue)
     }
     
     private func remove(_ connection: NWConnection) {
@@ -181,9 +122,8 @@ final class TCPServer {
             }
         }
         connections.removeAll()
-        connectionStates.last!.value = .cancelled
+        connectionStates.value = .cancelled
         onStreamUnavailable?()
-        //connectionStates.removeAll()
     }
     
     func stop() {
@@ -199,14 +139,19 @@ final class TCPServer {
     private func receive(_ connection: NWConnection) {
         readSize(connection)
     }
+    
+    private func cancelAndClose(_ connection: NWConnection) {
+        close(connection, cancel: true)
+    }
 
     private func readSize(_ connection: NWConnection) {
         debugPrint("!!! readSize function start \(Date().timeIntervalSince1970)")
-        connection.receive(minimumIncompleteLength: 4, maximumLength: 4) { sizeData, _, _, error in
+        let sizeCount = 4
+        connection.receive(minimumIncompleteLength: sizeCount, maximumLength: sizeCount) { sizeData, _, _, error in
             debugPrint("!!! readSize function end \(Date().timeIntervalSince1970)")
-            guard let sizeData, sizeData.count == 4 else {
+            guard let sizeData, sizeData.count == sizeCount else {
                 debugPrint("❌ Failed to read size:", error ?? "unknown")
-                self.close(connection, cancel: true)
+                self.cancelAndClose(connection)
                 return
             }
 
@@ -222,7 +167,7 @@ final class TCPServer {
             debugPrint("!!! readFrame function end \(Date().timeIntervalSince1970)")
             guard let chunk, !chunk.isEmpty else {
                 debugPrint("❌ Failed to read frame:", error ?? "unknown")
-                self.close(connection, cancel: true)
+                self.cancelAndClose(connection)
                 return
             }
 
@@ -260,7 +205,7 @@ final class TCPServer {
             inactivityTimers[identifier]?.cancel()
             inactivityTimers[identifier] = workItem
         }
-        DispatchQueue.global().asyncAfter(deadline: .now() + inactivityTimeout, execute: workItem)
+        connectionQueue.asyncAfter(deadline: .now() + inactivityTimeout, execute: workItem)
     }
 
     private func cancelInactivityTimeout(for connection: NWConnection) {
@@ -275,7 +220,7 @@ final class TCPServer {
         }
         lock.withLock {
             remove(connection)
-            connectionStates.last!.value = .cancelled
+            connectionStates.value = .cancelled
         }
         onStreamUnavailable?()
     }

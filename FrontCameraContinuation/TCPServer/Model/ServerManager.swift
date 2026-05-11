@@ -33,17 +33,25 @@ final class ServerManager {
     }()
     
     var listenerStatusPublisher: AnyPublisher<String, Never> {
-        server.listenerState.map(\.debugDescription).receive(on: RunLoop.main).eraseToAnyPublisher()
+        server.listenerState
+            .map(\.debugDescription)
+            .receive(on: RunLoop.main)
+            .eraseToAnyPublisher()
     }
     
     var connectionStateLastPublisher: AnyPublisher<String, Never> {
-        server.connectionStates.map { publisher in publisher.map(\.debugDescription).receive(on: RunLoop.main).eraseToAnyPublisher() }.last!
+        server.connectionStates
+            .map(\.debugDescription)
+            .receive(on: RunLoop.main)
+            .eraseToAnyPublisher()
     }
     
     var connectedPublisher: AnyPublisher<Bool, Never> {
-        server.listenerState.combineLatest(server.connectionStates.last!) // TODO: resolve exclamation
+        server.listenerState.combineLatest(server.connectionStates)
             .map { $0 == .ready && $1 == .ready }
-            .removeDuplicates().receive(on: RunLoop.main).eraseToAnyPublisher()
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .eraseToAnyPublisher()
     }
     
     func start(port: UInt16 = 9999) {

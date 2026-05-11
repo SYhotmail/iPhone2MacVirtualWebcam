@@ -4,7 +4,8 @@ import CoreMediaIO
 import OSLog
 import Synchronization
 
-final class VirtualCameraSinkClient {
+nonisolated
+final class VirtualCameraSinkClient: @unchecked Sendable {
     private let lock = Mutex(())
     private let logger = Logger(subsystem: "by.sy.TCPServer", category: "virtual-camera-sink")
 
