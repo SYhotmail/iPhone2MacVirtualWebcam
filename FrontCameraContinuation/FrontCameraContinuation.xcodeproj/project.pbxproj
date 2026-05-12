@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.Cam2Mac.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.Cam2Mac.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,7 +27,7 @@
 			dstPath = "$(SYSTEM_EXTENSIONS_FOLDER_PATH)";
 			dstSubfolderSpec = 16;
 			files = (
-				2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension in Embed System Extensions */,
+				2139DC382F92E69B00ECF1D1 /* by.sy.TCPServer.Cam2Mac.systemextension in Embed System Extensions */,
 			);
 			name = "Embed System Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -35,7 +35,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = by.sy.TCPServer.VirtualCameraExtension.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
+		2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.Cam2Mac.systemextension */ = {isa = PBXFileReference; explicitFileType = "wrapper.system-extension"; includeInIndex = 0; path = by.sy.TCPServer.Cam2Mac.systemextension; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482C02F91423800163538 /* FrontCameraContinuation.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FrontCameraContinuation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		215482D62F9143A900163538 /* Cam2Mac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Cam2Mac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -135,7 +135,7 @@
 			children = (
 				215482C02F91423800163538 /* FrontCameraContinuation.app */,
 				215482D62F9143A900163538 /* Cam2Mac.app */,
-				2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */,
+				2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.Cam2Mac.systemextension */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -162,7 +162,7 @@
 			packageProductDependencies = (
 			);
 			productName = VirtualCameraExtension;
-			productReference = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.VirtualCameraExtension.systemextension */;
+			productReference = 2139DC2E2F92E69B00ECF1D1 /* by.sy.TCPServer.Cam2Mac.systemextension */;
 			productType = "com.apple.product-type.system-extension";
 		};
 		215482BF2F91423800163538 /* FrontCameraContinuation */ = {
@@ -318,14 +318,15 @@
 				CODE_SIGN_IDENTITY = "Apple Development";
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = VirtualCameraExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = VirtualCameraExtension;
+				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Remote TCP Camera";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -333,7 +334,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.3;
 				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.VirtualCameraExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.Cam2Mac;
 				PRODUCT_NAME = "$(inherited)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
@@ -352,14 +353,15 @@
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = VirtualCameraExtension/VirtualCameraExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = VirtualCameraExtension/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = VirtualCameraExtension;
+				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Remote TCP Camera";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -367,7 +369,7 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.3;
 				MARKETING_VERSION = 1.2;
-				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.VirtualCameraExtension;
+				PRODUCT_BUNDLE_IDENTIFIER = by.sy.TCPServer.Cam2Mac;
 				PRODUCT_NAME = "$(inherited)";
 				REGISTER_APP_GROUPS = YES;
 				SDKROOT = macosx;
@@ -509,10 +511,11 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FrontCameraContinuation/FrontCameraContinuation.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Privacy - Camera Usage Description";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -546,10 +549,11 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = FrontCameraContinuation/FrontCameraContinuation.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Privacy - Camera Usage Description";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -586,7 +590,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -638,7 +642,7 @@
 				CODE_SIGN_ENTITLEMENTS = TCPServer/TCPServer.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;

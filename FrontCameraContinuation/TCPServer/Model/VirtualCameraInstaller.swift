@@ -9,27 +9,63 @@ final class VirtualCameraInstaller: NSObject {
     private(set)var status = "Not Installed"
     private static let applicationPathPrefix = "/Applications"
     
-    func activate() {
-        guard isRunningFromSystemApplicationsFolder else {
-            if openInstalledAppIfAvailable() {
-                status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
-            } else {
-                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to install the extension."
-            }
-            return
-        }
-
-        status = "Requesting Activation"
-
-        let request = OSSystemExtensionRequest.activationRequest(
-            forExtensionWithIdentifier: VirtualCameraConfiguration.extensionBundleIdentifier,
-            queue: .main
-        )
-        request.delegate = self
-        OSSystemExtensionManager.shared.submitRequest(request)
+    enum State {
+        case installed
+        case uninstalled
+        case waitingForActivation
     }
     
-    func deactivate() {
+    enum RequestState {
+        case installing
+        case uninstalling
+        case fetchingProperties
+    }
+    
+    private var isRunning = false
+    private var error: Error?
+    private var state: State?
+    
+    private var requestState: RequestState?
+    
+    let manager: OSSystemExtensionManager
+    init(manager: OSSystemExtensionManager = .shared) {
+        self.manager = manager
+    }
+    
+    private func extensionIdentifier() throws -> String {
+        guard let identifier = Bundle.main.bundleIdentifier else {
+            throw NSError(domain: "camera.installer", code: .min, userInfo: [NSLocalizedFailureErrorKey: "No Bundle ID"])
+        }
+     
+        return identifier.appending(".Cam2Mac")
+    }
+
+    
+    private func submitRequest(_ state: RequestState, identifier: String) {
+        let request: OSSystemExtensionRequest
+        let text: String
+        switch state {
+        case .fetchingProperties:
+            request = OSSystemExtensionRequest.propertiesRequest(forExtensionWithIdentifier: identifier,
+                                                                 queue: .main)
+            text = "Gathering properties"
+        case .installing:
+            request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: identifier,
+                                                                 queue: .main)
+            text = "Installing"
+        case .uninstalling:
+            request = OSSystemExtensionRequest.deactivationRequest(forExtensionWithIdentifier: identifier,
+                                                                   queue: .main)
+            text = "Uninstalling"
+        }
+        requestState = state
+        status = text
+        request.delegate = self
+        isRunning = true
+        manager.submitRequest(request)
+    }
+    
+    func activate() throws {
         guard isRunningFromSystemApplicationsFolder else {
             if openInstalledAppIfAvailable() {
                 status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
@@ -38,15 +74,37 @@ final class VirtualCameraInstaller: NSObject {
             }
             return
         }
+        
+        let identifier = try extensionIdentifier()
+        submitRequest(.installing, identifier: identifier)
+    }
+    
+    func detectProperties() throws {
+        guard isRunningFromSystemApplicationsFolder else {
+            if openInstalledAppIfAvailable() {
+                status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
+            } else {
+                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to install the extension."
+            }
+            return
+        }
+        
+        let identifier = try extensionIdentifier()
+        submitRequest(.fetchingProperties, identifier: identifier)
+    }
+    
+    func deactivate() throws {
+        guard isRunningFromSystemApplicationsFolder else {
+            if openInstalledAppIfAvailable() {
+                status = "Opened \(Self.applicationPathPrefix) copy. Uninstall the extension from that app."
+            } else {
+                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to uninstall the extension."
+            }
+            return
+        }
 
-        status = "Requesting Deactivation"
-
-        let request = OSSystemExtensionRequest.deactivationRequest(
-            forExtensionWithIdentifier: VirtualCameraConfiguration.extensionBundleIdentifier,
-            queue: .main
-        )
-        request.delegate = self
-        OSSystemExtensionManager.shared.submitRequest(request)
+        let identifier = try extensionIdentifier()
+        submitRequest(.uninstalling, identifier: identifier)
     }
 
     private var isRunningFromSystemApplicationsFolder: Bool {
@@ -59,8 +117,7 @@ final class VirtualCameraInstaller: NSObject {
             return false
         }
 
-        NSWorkspace.shared.open(installedURL)
-        return true
+        return NSWorkspace.shared.open(installedURL)
     }
     
     var installerNeedsApplicationsMove: Bool {
@@ -80,19 +137,44 @@ extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
+        self.isRunning = false
+        self.error = nil
+        
         switch result {
         case .completed:
             status = "Installed"
         case .willCompleteAfterReboot:
             status = "Installed After Restart"
         @unknown default:
-            status = "Finished"
+            status = ""
+        }
+    }
+    
+    func request(_ request: OSSystemExtensionRequest, foundProperties properties: [OSSystemExtensionProperties]) {
+        self.isRunning = false
+        self.error = nil
+        
+        guard !properties.isEmpty else {
+            return
+        }
+        let isEnabled = properties.contains { $0.isEnabled }
+        if isEnabled {
+            status = "Installed"  // should be installed.
+        } else if properties.contains(where: { $0.isUninstalling }) {
+            status = "Removing"
         }
     }
 
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
+        self.isRunning = false
+        self.error = error
+        
         let nsError = error as NSError
-        status = "Activation Failed (\(nsError.domain) \(nsError.code)): \(nsError.localizedDescription)"
+        #if DEBUG
+            status = "Failed (\(nsError.domain) \(nsError.code)): \(nsError.localizedDescription)"
+        #else
+            status = "Failed \(nsError.localizedDescription)"
+        #endif
     }
 
     func request(

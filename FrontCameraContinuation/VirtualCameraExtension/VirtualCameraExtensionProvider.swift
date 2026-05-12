@@ -9,7 +9,7 @@ import Synchronization
 
 final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, CMIOExtensionDeviceSource {
     private(set) var device: CMIOExtensionDevice!
-    private let logger = Logger(subsystem: "by.sy.TCPServer.VirtualCameraExtension", category: "sink-forwarder")
+    private let logger = Logger(subsystem: "by.sy.TCPServer.Cam2Mac", category: "sink-forwarder")
 
     fileprivate var streamSource: VirtualCameraExtensionSourceStream!
     fileprivate var streamSink: VirtualCameraExtensionSinkStream!
