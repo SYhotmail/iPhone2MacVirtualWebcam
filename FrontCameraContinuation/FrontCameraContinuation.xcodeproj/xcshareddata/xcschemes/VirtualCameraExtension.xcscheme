@@ -16,7 +16,7 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "2139DC2D2F92E69B00ECF1D1"
-               BuildableName = "by.sy.TCPServer.VirtualCameraExtension.systemextension"
+               BuildableName = "by.sy.TCPServer.Cam2Mac.systemextension"
                BlueprintName = "VirtualCameraExtension"
                ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
             </BuildableReference>
@@ -52,7 +52,7 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "2139DC2D2F92E69B00ECF1D1"
-            BuildableName = "by.sy.TCPServer.VirtualCameraExtension.systemextension"
+            BuildableName = "by.sy.TCPServer.Cam2Mac.systemextension"
             BlueprintName = "VirtualCameraExtension"
             ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
          </BuildableReference>
