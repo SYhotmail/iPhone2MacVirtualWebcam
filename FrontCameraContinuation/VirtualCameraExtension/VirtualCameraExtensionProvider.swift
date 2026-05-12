@@ -3,10 +3,11 @@ import CoreMedia
 @preconcurrency import CoreMediaIO
 import IOKit.audio
 import OSLog
+import Synchronization
 
 // MARK: -
 
-final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSource {
+final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, CMIOExtensionDeviceSource {
     private(set) var device: CMIOExtensionDevice!
     private let logger = Logger(subsystem: "by.sy.TCPServer.VirtualCameraExtension", category: "sink-forwarder")
 
@@ -16,6 +17,9 @@ final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSou
     private var streamingCounter: UInt32 = 0
     private var streamingSinkCounter: UInt32 = 0
     private var sinkStarted = false
+    
+    private let lock = Mutex(())
+    
 
     init(localizedName: String) {
         var formatDescription: CMFormatDescription?
@@ -84,12 +88,18 @@ final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSou
 
     func setDeviceProperties(_ deviceProperties: CMIOExtensionDeviceProperties) throws {}
 
-    func startStreaming() {
+    private func startStreamingCore() {
         streamingCounter += 1
         logger.error("Source stream started. count=\(self.streamingCounter)")
     }
+    
+    func startStreaming() {
+        lock.withLock { _ in
+            startStreamingCore()
+        }
+    }
 
-    func stopStreaming() {
+    private func stopStreamingCore() {
         if streamingCounter > 1 {
             streamingCounter -= 1
         } else {
@@ -97,15 +107,29 @@ final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSou
         }
         logger.error("Source stream stopped. count=\(self.streamingCounter)")
     }
+    
+    func stopStreaming() {
+        lock.withLock { _ in
+            stopStreamingCore()
+        }
+    }
 
-    func startStreamingSink(client: CMIOExtensionClient) {
+    private func startStreamingSinkCore() {
         streamingSinkCounter += 1
         sinkStarted = true
         logger.error("Sink stream started. count=\(self.streamingSinkCounter)")
+    }
+    
+    func startStreamingSink(client: CMIOExtensionClient) {
+        lock.withLock { _ in
+            startStreamingSinkCore()
+        }
+        
         consumeBuffers(from: client)
     }
+    
 
-    func stopStreamingSink() {
+    private func stopStreamingSinkCore() {
         sinkStarted = false
         if streamingSinkCounter > 1 {
             streamingSinkCounter -= 1
@@ -114,37 +138,61 @@ final class VirtualCameraExtensionDeviceSource: NSObject, CMIOExtensionDeviceSou
         }
         logger.error("Sink stream stopped. count=\(self.streamingSinkCounter)")
     }
+    
+    func stopStreamingSink() {
+        lock.withLock { _ in
+            stopStreamingSinkCore()
+        }
+    }
+    
+    var hasStreamingCounter: Bool {
+        lock.withLock { _ in
+            streamingCounter > 0
+        }
+    }
+    
+    var isSinkStarted: Bool {
+        lock.withLock { _ in
+            sinkStarted
+        }
+    }
+    
+    private func handleSampleBufferConsumption(_ sampleBuffer: CMSampleBuffer?,
+                                               sequenceNumber: UInt64) {
+        guard let sampleBuffer else {
+            logger.error("Sink consume returned nil sample buffer")
+            return
+        }
+
+        let hostTimeInNanoseconds = UInt64(sampleBuffer.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
+        logger.error("Consumed sink sample buffer seq=\(sequenceNumber) host=\(hostTimeInNanoseconds)")
+        let scheduledOutput = CMIOExtensionScheduledOutput(
+            sequenceNumber: sequenceNumber,
+            hostTimeInNanoseconds: hostTimeInNanoseconds
+        )
+
+        let stream = streamSource.stream
+        if hasStreamingCounter {
+            stream?.send(
+                sampleBuffer,
+                discontinuity: [],
+                hostTimeInNanoseconds: hostTimeInNanoseconds
+            )
+            logger.error("Forwarded sink sample buffer to source seq=\(sequenceNumber)")
+        } else {
+            logger.error("Dropped sink sample buffer because source stream is inactive")
+        }
+        
+        stream?.notifyScheduledOutputChanged(scheduledOutput)
+    }
 
     private func consumeBuffers(from client: CMIOExtensionClient) {
-        guard sinkStarted else { return }
+        guard isSinkStarted else { return }
 
         streamSink.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, _, _, _ in
             guard let self else { return }
-            defer { self.consumeBuffers(from: client) }
-            guard let sampleBuffer else {
-                self.logger.error("Sink consume returned nil sample buffer")
-                return
-            }
-
-            let hostTimeInNanoseconds = UInt64(sampleBuffer.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
-            self.logger.error("Consumed sink sample buffer seq=\(sequenceNumber) host=\(hostTimeInNanoseconds)")
-            let scheduledOutput = CMIOExtensionScheduledOutput(
-                sequenceNumber: sequenceNumber,
-                hostTimeInNanoseconds: hostTimeInNanoseconds
-            )
-
-            if self.streamingCounter > 0 {
-                self.streamSource.stream.send(
-                    sampleBuffer,
-                    discontinuity: [],
-                    hostTimeInNanoseconds: hostTimeInNanoseconds
-                )
-                self.logger.error("Forwarded sink sample buffer to source seq=\(sequenceNumber)")
-            } else {
-                self.logger.error("Dropped sink sample buffer because source stream is inactive")
-            }
-
-            self.streamSink.stream.notifyScheduledOutputChanged(scheduledOutput)
+            self.handleSampleBufferConsumption(sampleBuffer, sequenceNumber: sequenceNumber)
+            self.consumeBuffers(from: client)
         }
     }
 }

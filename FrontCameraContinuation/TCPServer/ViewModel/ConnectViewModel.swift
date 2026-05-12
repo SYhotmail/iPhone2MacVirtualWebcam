@@ -69,7 +69,7 @@ final class ConnectViewModel {
     }
 
     var installerHealthy: Bool {
-        installer.status == "Installed" || installer.status == "Installed After Restart"
+        installer.installerHealthy
     }
     
     var receiverKeepRunningTitle: String {

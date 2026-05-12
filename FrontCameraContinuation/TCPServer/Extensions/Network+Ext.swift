@@ -11,6 +11,7 @@ protocol NetworkConnectionStateProvable {
     var isConnected: Bool { get }
 }
 
+nonisolated
 extension NWConnection.State : NetworkConnectionStateProvable, @retroactive CustomDebugStringConvertible {
     var error: NWError? {
         switch self {
@@ -51,6 +52,7 @@ extension NWConnection.State : NetworkConnectionStateProvable, @retroactive Cust
     }
 }
 
+nonisolated
 extension NWListener.State: NetworkConnectionStateProvable, @retroactive CustomDebugStringConvertible {
     var error: NWError? {
         switch self {

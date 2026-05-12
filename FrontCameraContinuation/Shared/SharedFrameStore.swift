@@ -4,14 +4,48 @@ import CoreMedia
 import CoreVideo
 
 
+nonisolated
 struct VirtualCameraSampleBufferConverter {
-    private let context = CIContext(options: [.cacheIntermediates: false])
+    struct Configuration {
+        let streamWidth: Int
+        var streamHeight: Int
+        let pixelFormat: OSType
+        let frameDuration: CMTime
+        
+        init(streamWidth: Int,
+             streamHeight: Int,
+             pixelFormat: OSType,
+             frameDuration: CMTime) {
+            self.streamWidth = streamWidth
+            self.streamHeight = streamHeight
+            self.pixelFormat = pixelFormat
+            self.frameDuration = frameDuration
+        }
+        
+        init() {
+            self.init(streamWidth: VirtualCameraConfiguration.streamWidth,
+                      streamHeight: VirtualCameraConfiguration.streamHeight,
+                      pixelFormat: VirtualCameraConfiguration.pixelFormat,
+                      frameDuration: VirtualCameraConfiguration.frameDuration)
+        }
+    }
+    
+    let configuration: Configuration
+    let context: CIContext
+    
+    init(configuration: Configuration = .init(),
+         context: CIContext = .init(options: [.cacheIntermediates: false])) {
+        self.configuration = configuration
+        self.context = context
+    }
     
     private static func makeVirtualCameraPixelBuffer(from imageBuffer: CVImageBuffer, context: CIContext) -> CVPixelBuffer? {
         var pixelBuffer: CVPixelBuffer?
         let streamWidth = VirtualCameraConfiguration.streamWidth
         let streamHeight = VirtualCameraConfiguration.streamHeight
         let pixelFormat = VirtualCameraConfiguration.pixelFormat
+        
+        assert(!Thread.isMainThread)
         
         let attributes: [CFString: Any] = [
             kCVPixelBufferWidthKey: streamWidth,

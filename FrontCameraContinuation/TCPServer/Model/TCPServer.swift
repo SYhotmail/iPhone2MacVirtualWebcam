@@ -44,7 +44,7 @@ final class TCPServer: @unchecked Sendable {
         }
         
         let listener = try NWListener(using: .tcp, on: portValue)
-        listener.newConnectionLimit = 1 // limit one?
+        // listener.newConnectionLimit = 1 // TODO: why not one?
         listener.newConnectionHandler = { [weak self] connection in
             self?.handleNewConnection(connection)
         }
@@ -52,6 +52,11 @@ final class TCPServer: @unchecked Sendable {
         listener.stateUpdateHandler = { [weak self] state in
             debugPrint("Listener State \(state)")
             self?.listenerState.value = state
+        }
+        
+        self.lock.lock()
+        defer {
+            self.lock.unlock()
         }
 
         self.listener = listener

@@ -89,7 +89,7 @@ final class QuickSetupViewModel {
         ),
         Step(
             title: "Pick the virtual camera in apps",
-            detail: "Choose `Remote Camera` in Zoom, Meet, QuickTime, or another macOS camera app."
+            detail: "Choose `\(VirtualCameraConfiguration.deviceName)` in Zoom, Meet, QuickTime, or another macOS camera app."
         )
     ]
 }

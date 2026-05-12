@@ -38,13 +38,23 @@ struct VideoViewRepresentable: NSViewRepresentable {
     }
     
     final class Coordinator: NSObject {
-        var cancellable: AnyCancellable?
+        var cancellable: AnyCancellable? {
+            didSet {
+                guard let oldValue, oldValue != cancellable else {
+                    return
+                }
+                oldValue.cancel()
+            }
+        }
+        
         
         func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
             guard let renderer else {
+                cancellable = nil
                 return
             }
-            cancellable = frameProvider.decodedFrameSubject().sink { [weak renderer] buffer in
+            
+            cancellable = frameProvider.decodedFrameSubject().onMainAnyPublisher().sink { [weak renderer] buffer in
                 renderer?.enqueue(buffer)
             }
         }

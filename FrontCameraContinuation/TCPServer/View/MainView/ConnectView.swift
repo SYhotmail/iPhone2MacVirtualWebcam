@@ -45,8 +45,13 @@ struct ConnectView: View {
                     .blur(radius: ConnectViewLayout.accentOrbBlur)
                     .offset(ConnectViewLayout.accentOrbOffset)
 
-                content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
-                    .padding(ConnectViewLayout.outerPadding)
+                ScrollView(.vertical, showsIndicators: false) {
+                    content(sidebarWidth: sidebarWidth, previewHeight: previewHeight)
+                        .padding(ConnectViewLayout.outerPadding)
+                        .frame(maxWidth: .infinity,
+                               minHeight: proxy.size.height,
+                               alignment: .top)
+                }
             }
         }
         .task {
@@ -95,7 +100,7 @@ struct ConnectView: View {
     private var headerCard: some View {
         HStack(alignment: .top, spacing: ConnectViewLayout.headerSpacing) {
             VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
-                Text("Remote Camera Receiver")
+                Text("\(VirtualCameraConfiguration.deviceName) Receiver")
                     .font(.title.weight(.bold))
                     .fontDesign(.rounded)
                     .foregroundStyle(palette.primaryText)

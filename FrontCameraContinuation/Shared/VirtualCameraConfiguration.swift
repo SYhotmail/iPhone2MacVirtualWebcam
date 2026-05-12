@@ -4,7 +4,7 @@ nonisolated
 enum VirtualCameraConfiguration {
     static let extensionBundleIdentifier = "by.sy.TCPServer.VirtualCameraExtension"
     static let deviceName = "Remote Camera"
-    static let manufacturerName = "FrontCameraContinuation"
+    static let manufacturerName = "Siarhei Yakushevich"
     static let modelName = "Virtual Camera"
     static let streamWidth = 1280
     static let streamHeight = 720
@@ -13,6 +13,9 @@ enum VirtualCameraConfiguration {
     static let frameRate = 30
     
     static var frameDuration: CMTime {
+        guard frameRate > 0 else {
+            return CMTime.invalid
+        }
         return CMTime(value: 1, timescale: CMTimeScale(frameRate))
     }
 }

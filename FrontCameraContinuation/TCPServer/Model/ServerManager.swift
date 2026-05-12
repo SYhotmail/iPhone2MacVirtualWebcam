@@ -9,20 +9,30 @@ import Foundation
 import Combine
 import CoreMedia
 import Network
+import Synchronization
 
 protocol PreviewDecodedFrameProvidable {
-    func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never>
+   nonisolated func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never>
 }
 
-final class ServerManager {
+nonisolated
+final class ServerManager: @unchecked Sendable {
     private let server = TCPServer()
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
-    private var decodedFrameCancellable: AnyCancellable?
+    private nonisolated(unsafe) var decodedFrameCancellable: AnyCancellable?
+    private nonisolated(unsafe) var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
     let decoder = H264Decoder()
     
-    private lazy var sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>! = {
-        decoder.decodedFramePublisher
+    let lock = Mutex(())
+    
+    
+    private func setSharedFrameProvider() -> AnyPublisher<CMSampleBuffer, Never> {
+        if let value = _sharedFrameProvider {
+            return value
+        }
+        
+        let _sharedFrameProvider = decoder.decodedFramePublisher
             .receive(on: DispatchQueue.global(qos: .userInitiated))
             .eraseToAnyPublisher()
             .compactMap { [weak self] sampleBuffer in
@@ -30,34 +40,37 @@ final class ServerManager {
             }
             .share()
             .eraseToAnyPublisher()
-    }()
+        self._sharedFrameProvider = _sharedFrameProvider
+        return _sharedFrameProvider
+    }
+    
+    private var sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never> {
+        lock.withLockIfAvailable { _ in
+            setSharedFrameProvider()
+        } ?? setSharedFrameProvider()
+    }
     
     var listenerStatusPublisher: AnyPublisher<String, Never> {
         server.listenerState
             .map(\.debugDescription)
-            .receive(on: RunLoop.main)
-            .eraseToAnyPublisher()
+            .onMainAnyPublisher()
     }
     
     var connectionStateLastPublisher: AnyPublisher<String, Never> {
         server.connectionStates
             .map(\.debugDescription)
-            .receive(on: RunLoop.main)
-            .eraseToAnyPublisher()
+            .onMainAnyPublisher()
     }
     
     var connectedPublisher: AnyPublisher<Bool, Never> {
         server.listenerState.combineLatest(server.connectionStates)
             .map { $0 == .ready && $1 == .ready }
             .removeDuplicates()
-            .receive(on: RunLoop.main)
-            .eraseToAnyPublisher()
+            .onMainAnyPublisher()
     }
     
-    func start(port: UInt16 = 9999) {
-        sinkClient.start()
-
-        decodedFrameCancellable = decodedFrameSubject()
+    private func bindCore(port: UInt16) {
+        decodedFrameCancellable = sharedFrameProvider
             .sink { [weak self] sampleBuffer in
                 self?.sinkClient.enqueue(sampleBuffer)
             }
@@ -69,7 +82,13 @@ final class ServerManager {
         server.onStreamUnavailable = { [weak self] in
             self?.resetDecoder()
         }
-        
+    }
+    
+    func start(port: UInt16 = 9999) {
+        lock.withLock { _ in
+            bindCore(port: port)
+        }
+        sinkClient.start()
         try? server.start(port: port)
     }
     
@@ -78,17 +97,24 @@ final class ServerManager {
     }
     
     func stop() {
-        server.onFrame = nil
-        server.onStreamUnavailable = nil
-        decodedFrameCancellable = nil
+        lock.withLock { _ in
+            unbindCore()
+        }
+        
         sinkClient.stop()
         resetDecoder()
         server.stop()
     }
+    
+    private func unbindCore() {
+        server.onFrame = nil
+        server.onStreamUnavailable = nil
+        decodedFrameCancellable = nil
+    }
 }
 
 extension ServerManager: PreviewDecodedFrameProvidable {
-    func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never> {
+    nonisolated func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never> {
         sharedFrameProvider
     }
 }

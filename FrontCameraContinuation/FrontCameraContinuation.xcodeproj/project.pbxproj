@@ -51,7 +51,6 @@
 		2139DC3F2F92E7C200ECF1D1 /* Exceptions for "Shared" folder in "VirtualCameraExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				SharedFrameStore.swift,
 				VirtualCameraConfiguration.swift,
 			);
 			target = 2139DC2D2F92E69B00ECF1D1 /* VirtualCameraExtension */;
