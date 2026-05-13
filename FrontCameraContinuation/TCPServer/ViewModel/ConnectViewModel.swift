@@ -18,6 +18,17 @@ final class ConnectViewModel {
     private(set) var networkAddresses = [String]()
     
     @ObservationIgnored
+    private(set) var scheduleTask: Task<Void, Never>? {
+        didSet {
+            if let oldValue, !oldValue.isCancelled {
+                oldValue.cancel()
+            }
+        }
+    }
+    
+    private(set)var detectedProperties = false
+    
+    @ObservationIgnored
     private lazy var pasteboard: NSPasteboard! = {
         NSPasteboard.general
     }()
@@ -63,9 +74,13 @@ final class ConnectViewModel {
     var connectionReady: Bool {
         connectionStatus == "Ready"
     }
-
+    
     var installerNeedsApplicationsMove: Bool {
         installer.installerNeedsApplicationsMove
+    }
+    
+    var installerNeedsApplicationsMoveTextMessage: String? {
+        installer.installerNeedsApplicationsMoveTextMessage
     }
 
     var installerHealthy: Bool {
@@ -193,13 +208,37 @@ final class ConnectViewModel {
             refreshNetworkAddresses()
         }
     }
+    
+    func scheduleDetectProperties() {
+        guard scheduleTask == nil, !detectedProperties else {
+            return
+        }
+        
+        scheduleTask = Task {
+            let result = try? detectProperties()
+            handleDetectPropertiesCall(failed: result != true)
+        }
+    }
+    
+    private func handleDetectPropertiesCall(failed: Bool) {
+        guard failed else {
+            return
+        }
+        
+        scheduleTask = nil
+        detectedProperties = true
+    }
+    
+    private func detectProperties() throws -> Bool {
+        try installer.detectProperties()
+    }
 
     func installCamera() {
-        installer.activate()
+        _ = try? installer.activate()
     }
 
     func uninstallCamera() {
-        installer.deactivate()
+        _ = try? installer.deactivate()
     }
     
     var listenTextPort: String {
@@ -235,6 +274,11 @@ final class ConnectViewModel {
                 self.connectionStatus = value
             }
             .store(in: &cancellables)
+        
+        installer.detectedPropertiesSubject.sink { [unowned self] detectedProperties in
+            self.detectedProperties = detectedProperties
+            self.scheduleTask = nil
+        }.store(in: &cancellables)
     }
     
     func provideQuickSetupViewModel() -> QuickSetupViewModel {

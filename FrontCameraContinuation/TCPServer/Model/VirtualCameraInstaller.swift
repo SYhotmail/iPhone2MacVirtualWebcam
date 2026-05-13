@@ -6,175 +6,290 @@ import SystemExtensions
 @MainActor
 @Observable
 final class VirtualCameraInstaller: NSObject {
-    private(set)var status = "Not Installed"
     private static let applicationPathPrefix = "/Applications"
     
-    enum State {
-        case installed
+    enum ComponentState: CustomStringConvertible {
+        case installing(needReboot: Bool)
+        case installed(enabled: Bool?)
+        case uninstalling(waitingForApproval: Bool)
         case uninstalled
-        case waitingForActivation
+        
+        var isInstallationRelated: Bool {
+            if case .installed = self {
+                return true
+            }
+            
+            if case .installing = self {
+                return true
+            }
+            
+            return false
+        }
+        
+        var description: String {
+            switch self {
+            case .installed(let enabled):
+                return "Installed \(enabled.map(\.description) ?? "")"
+            case .installing(let needReboot):
+                return "Installing \(needReboot ? "Reboot" : "")"
+            case .uninstalled:
+                return "Uninstalled"
+            case .uninstalling(let waitingForApproval):
+                return "Uninstalling \(waitingForApproval ? "Waiting for approval" : "")"
+            }
+        }
     }
     
-    enum RequestState {
+    enum RequestAction {
+        case completed(needReboot: Bool)
+    }
+    
+    enum RequestType: CustomStringConvertible {
         case installing
         case uninstalling
         case fetchingProperties
+        
+        var description: String {
+            switch self {
+            case .fetchingProperties:
+                return "Gathering properties"
+            case .installing:
+                return "Installing"
+            case .uninstalling:
+                return "Uninstalling"
+            }
+        }
     }
     
+    private(set)var status: String?
     private var isRunning = false
-    private var error: Error?
-    private var state: State?
+    @ObservationIgnored
+    private(set)var detectedPropertiesSubject = CurrentValueSubject<Bool, Never>(false)
+    private var componentState: ComponentState?
     
-    private var requestState: RequestState?
+    private var requestType: RequestType? {
+        didSet {
+            isRunning = true
+            status = requestType?.description
+        }
+    }
+    
+    private var requestResult: Result<RequestAction, Error>? {
+        didSet {
+            isRunning = false
+        }
+    }
     
     let manager: OSSystemExtensionManager
-    init(manager: OSSystemExtensionManager = .shared) {
+    let fileManager: FileManager
+    let bundle: Bundle
+    let workspace: NSWorkspace
+    let appName: String
+    
+    init(manager: OSSystemExtensionManager = .shared,
+         fileManager: FileManager = .default,
+         bundle: Bundle = .main,
+         workspace: NSWorkspace = .shared) {
         self.manager = manager
+        self.fileManager = fileManager
+        self.bundle = bundle
+        self.workspace = workspace
+        let bundleURL = bundle.bundleURL
+        let name = bundleURL.lastPathComponent
+        self.appName = name
     }
     
     private func extensionIdentifier() throws -> String {
-        guard let identifier = Bundle.main.bundleIdentifier else {
+        guard let identifier = bundle.bundleIdentifier else {
             throw NSError(domain: "camera.installer", code: .min, userInfo: [NSLocalizedFailureErrorKey: "No Bundle ID"])
         }
      
-        return identifier.appending(".Cam2Mac")
+        let dot = "."
+        var name = appName
+        if let firstPart = name.split(separator: dot).first {
+            name = String(firstPart)
+        }
+        
+        return identifier.appending(dot + name)
     }
 
     
-    private func submitRequest(_ state: RequestState, identifier: String) {
+    private func submitRequest(_ requestType: RequestType, identifier: String) {
         let request: OSSystemExtensionRequest
-        let text: String
-        switch state {
+        switch requestType {
         case .fetchingProperties:
             request = OSSystemExtensionRequest.propertiesRequest(forExtensionWithIdentifier: identifier,
                                                                  queue: .main)
-            text = "Gathering properties"
         case .installing:
             request = OSSystemExtensionRequest.activationRequest(forExtensionWithIdentifier: identifier,
                                                                  queue: .main)
-            text = "Installing"
         case .uninstalling:
             request = OSSystemExtensionRequest.deactivationRequest(forExtensionWithIdentifier: identifier,
                                                                    queue: .main)
-            text = "Uninstalling"
         }
-        requestState = state
-        status = text
+        
+        self.requestType = requestType
+        
         request.delegate = self
-        isRunning = true
         manager.submitRequest(request)
     }
     
-    func activate() throws {
-        guard isRunningFromSystemApplicationsFolder else {
-            if openInstalledAppIfAvailable() {
-                status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
-            } else {
-                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to install the extension."
-            }
-            return
-        }
-        
-        let identifier = try extensionIdentifier()
-        submitRequest(.installing, identifier: identifier)
-    }
-    
-    func detectProperties() throws {
-        guard isRunningFromSystemApplicationsFolder else {
-            if openInstalledAppIfAvailable() {
-                status = "Opened \(Self.applicationPathPrefix) copy. Install the extension from that app."
-            } else {
-                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to install the extension."
-            }
-            return
-        }
-        
-        let identifier = try extensionIdentifier()
-        submitRequest(.fetchingProperties, identifier: identifier)
-    }
-    
-    func deactivate() throws {
-        guard isRunningFromSystemApplicationsFolder else {
-            if openInstalledAppIfAvailable() {
-                status = "Opened \(Self.applicationPathPrefix) copy. Uninstall the extension from that app."
-            } else {
-                status = "Run \(Self.applicationPathPrefix)/Cam2Mac.app to uninstall the extension."
-            }
-            return
-        }
-
-        let identifier = try extensionIdentifier()
-        submitRequest(.uninstalling, identifier: identifier)
+    private var bundleURL: URL {
+        bundle.bundleURL
     }
 
     private var isRunningFromSystemApplicationsFolder: Bool {
-        Bundle.main.bundleURL.standardizedFileURL.path.hasPrefix("\(Self.applicationPathPrefix)/")
+        bundleURL.standardizedFileURL.path.hasPrefix("\(Self.applicationPathPrefix)/")
     }
 
-    private func openInstalledAppIfAvailable() -> Bool {
-        let installedURL = URL(fileURLWithPath: "\(Self.applicationPathPrefix)/\(Bundle.main.bundleURL.lastPathComponent)")
-        guard FileManager.default.fileExists(atPath: installedURL.path) else {
+    private func urlOfAppInApplications() -> URL? {
+        let installedURL = URL(fileURLWithPath: "\(Self.applicationPathPrefix)/\(bundleURL.lastPathComponent)")
+        let path = installedURL.path()
+        let result = fileManager.fileExists(atPath: path) && fileManager.isExecutableFile(atPath: path) ? installedURL : nil
+        return result
+    }
+    
+    private func makeRequest(type requestType: RequestType) throws -> Bool {
+        var flag = isRunningFromSystemApplicationsFolder
+#if DEBUG
+        if !flag, requestType == .fetchingProperties {
+            flag = urlOfAppInApplications() != nil // allow to run debug application...
+        }
+#endif
+        guard flag else {
+            let isOpened = urlOfAppInApplications().flatMap { workspace.open($0) } == true
+            status = statusForOpenedApp(isOpened: isOpened, installed: requestType != .uninstalling)
             return false
         }
-
-        return NSWorkspace.shared.open(installedURL)
+        
+        let identifier = try extensionIdentifier()
+        submitRequest(requestType, identifier: identifier)
+        return true
+    }
+    
+    @discardableResult
+    func activate() throws -> Bool {
+        try makeRequest(type: .installing)
+    }
+    
+    @discardableResult
+    func detectProperties() throws -> Bool {
+        try makeRequest(type: .fetchingProperties)
+    }
+    
+    @discardableResult
+    func deactivate() throws -> Bool {
+        try makeRequest(type: .uninstalling)
+    }
+    
+    private func statusForOpenedApp(isOpened: Bool, installed: Bool) -> String {
+        let text = installed ? "Install" : "Uninstall"
+        if isOpened {
+            return "Opened \(Self.applicationPathPrefix) copy. \(text) the extension from that app."
+        } else {
+            return "Run \(Self.applicationPathPrefix)/\(appName) to \(text.lowercased()) the extension."
+        }
     }
     
     var installerNeedsApplicationsMove: Bool {
-        status.contains(Self.applicationPathPrefix)
+        !isRunningFromSystemApplicationsFolder && componentState == nil && urlOfAppInApplications() != nil
+    }
+    
+    var installerNeedsApplicationsMoveTextMessage: String? {
+        guard installerNeedsApplicationsMove else {
+            return nil
+        }
+        return "Open the copy in `\(Self.applicationPathPrefix)` before installing the system extension."
     }
     
     var installerHealthy: Bool {
-        // status == "Installed" || status == "Installed After Restart"
-        status.hasPrefix("Installed") // TODO: use some state...
+        componentState?.isInstallationRelated == true
+        
     }
 }
 
 // MARK: - OSSystemExtensionRequestDelegate
 extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
+    static var awaitingApproval: String {
+        "Awaiting Approval"
+    }
+    
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
-        status = "Waiting For User Approval"
+        requestResult = nil // waiting for Approval..
+        status = Self.awaitingApproval
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
-        self.isRunning = false
-        self.error = nil
+        var needReboot: Bool?
         
         switch result {
         case .completed:
-            status = "Installed"
+            needReboot = false
         case .willCompleteAfterReboot:
-            status = "Installed After Restart"
+            needReboot = true
         @unknown default:
-            status = ""
+            assert(false)
         }
+        
+        requestResult = needReboot.flatMap { .success(.completed(needReboot: $0)) }
+        
+        guard let needReboot, let requestType else {
+            return
+        }
+        
+        switch requestType {
+        case .installing:
+            componentState = needReboot ? .installing(needReboot: true) : .installed(enabled: true)
+        case .uninstalling:
+            componentState = needReboot ? .uninstalling(waitingForApproval: false) : .uninstalled
+        default:
+            return
+        }
+        
+        status = componentState?.description
+    }
+    
+    static func bundleShortVersions(_ version: String) -> [Int] {
+        version.split(separator: ".").compactMap { Int($0) }
     }
     
     func request(_ request: OSSystemExtensionRequest, foundProperties properties: [OSSystemExtensionProperties]) {
-        self.isRunning = false
-        self.error = nil
+        isRunning = false
+        status = nil
+        detectedPropertiesSubject.value = true
         
-        guard !properties.isEmpty else {
+        let bundleShortVersion = bundle.bundleShortVersionString
+        let bundleVersion = bundle.buildVersionString
+        
+        let property = properties.first { $0.bundleVersion == bundleVersion && $0.bundleShortVersion == bundleShortVersion }
+        
+        guard let property else {
             return
         }
-        let isEnabled = properties.contains { $0.isEnabled }
-        if isEnabled {
-            status = "Installed"  // should be installed.
-        } else if properties.contains(where: { $0.isUninstalling }) {
+        
+        let isEnabled = property.isEnabled
+        let isAwaitingUserApproval = property.isAwaitingUserApproval
+        let isUninstalling = property.isUninstalling
+        
+        if isUninstalling {
             status = "Removing"
+            componentState = .uninstalling(waitingForApproval: isAwaitingUserApproval)
+        } else {
+            
+            if isAwaitingUserApproval {
+                status = Self.suffixed(text: "Installing", with: Self.awaitingApproval)
+                componentState = .installing(needReboot: false)
+            } else {
+                status = isEnabled ? "Installed" : Self.suffixed(text: "Installed", with: "disabled")
+                componentState = .installed(enabled: isEnabled)
+            }
+        
         }
     }
-
+    
     func request(_ request: OSSystemExtensionRequest, didFailWithError error: Error) {
-        self.isRunning = false
-        self.error = error
-        
-        let nsError = error as NSError
-        #if DEBUG
-            status = "Failed (\(nsError.domain) \(nsError.code)): \(nsError.localizedDescription)"
-        #else
-            status = "Failed \(nsError.localizedDescription)"
-        #endif
+        requestResult = .failure(error)
+        status = Self.statusFromError(error)
     }
 
     func request(
@@ -183,5 +298,29 @@ extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
         withExtension ext: OSSystemExtensionProperties
     ) -> OSSystemExtensionRequest.ReplacementAction {
         .replace
+    }
+    
+    // MARK: - Private
+    
+    nonisolated
+    private static func suffixed(text string: String?, with suffix: String) -> String {
+        [string, wrapInBrackets(suffix.capitalized)].compactMap { $0 }.joined(separator: " ")
+    }
+    
+    nonisolated
+    private static func wrapInBrackets(_ string: String) -> String {
+        return "(" + string + ")"
+    }
+    
+    nonisolated
+    private static func statusFromError(_ error: Error) -> String {
+        let nsError = error as NSError
+        let middlePart: String
+#if DEBUG
+        middlePart = Self.wrapInBrackets("\(nsError.domain) \(nsError.code)")
+#else
+        middlePart = ""
+#endif
+        return "Failed \(middlePart) \(nsError.localizedDescription)"
     }
 }

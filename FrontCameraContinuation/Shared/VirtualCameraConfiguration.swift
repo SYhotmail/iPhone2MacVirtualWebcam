@@ -2,6 +2,7 @@ import CoreMedia
 
 nonisolated
 enum VirtualCameraConfiguration {
+    static let appName = "Cam2Mac"
     static let deviceName = "Remote Camera"
     static let manufacturerName = "Siarhei Yakushevich"
     static let modelName = "Virtual Camera"

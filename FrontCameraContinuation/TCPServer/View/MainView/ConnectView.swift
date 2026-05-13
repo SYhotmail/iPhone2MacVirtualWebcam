@@ -70,6 +70,9 @@ struct ConnectView: View {
             HStack(alignment: .top, spacing: ConnectViewLayout.columnSpacing) {
                 VStack(spacing: ConnectViewLayout.sectionSpacing) {
                     controlCard
+                        .onAppear {
+                            self.viewModel.scheduleDetectProperties()
+                        }
                     if viewModel.isPreviewVisible {
                         statusCard
                     }
@@ -183,17 +186,21 @@ struct ConnectView: View {
                         systemImage: "arrow.down.circle.fill",
                         action: viewModel.installCamera
                     )
-
+                    .allowsHitTesting(viewModel.detectedProperties)
+                    .opacity(viewModel.detectedProperties ? 1 : 0.3)
+                    
                     secondaryActionButton(
                         title: "Remove Camera",
                         systemImage: "trash.circle.fill",
                         action: viewModel.uninstallCamera
                     )
+                    .allowsHitTesting(viewModel.detectedProperties)
+                    .opacity(viewModel.detectedProperties ? 1 : 0.3)
                 }
             }
 
-            if viewModel.installerNeedsApplicationsMove {
-                Label("Open the copy in `/Applications` before installing the system extension.", systemImage: "arrow.up.right.square")
+            if let text = viewModel.installerNeedsApplicationsMoveTextMessage {
+                Label(text, systemImage: "arrow.up.right.square")
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(palette.cautionColor)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -245,7 +252,7 @@ struct ConnectView: View {
 
                 statusItem(
                     title: "Virtual Camera",
-                    value: viewModel.installer.status,
+                    value: viewModel.installer.status ?? "",
                     systemImage: "camera.badge.ellipsis",
                     tint: installerTint
                 )
