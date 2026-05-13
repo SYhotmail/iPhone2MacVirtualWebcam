@@ -1,18 +1,18 @@
-# FrontCameraContinuation
+# Cam2Camera
 
 Use an iPhone front camera as a virtual webcam on a Mac over your local network.
 
 The project contains:
 
-- `FrontCameraContinuation`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TCP
-- `Cam2Mac`: the macOS app that receives and previews the stream, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
+- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TCP
+- `Cam2Camera`: the macOS app that receives and previews the stream, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
 - `VirtualCameraExtension`: the macOS system extension that exposes the virtual camera to apps like Zoom and bridges the sink stream to the source stream apps actually read from
 
 ## How It Works
 
-1. Run `Cam2Mac` on your Mac.
+1. Run `Cam2Camera` on your Mac.
 2. Install and activate the virtual camera from the Mac app.
-3. Run `FrontCameraContinuation` on your iPhone.
+3. Run `Cam2Camera` on your iPhone.
 4. Use the LAN IP address and port shown in the Mac app, then enter them in the iPhone app (if they don't match)
 5. Start streaming from the iPhone.
 6. Select the virtual camera(Remote Camera) in Zoom, Meet, QuickTime, or another camera app on macOS.
@@ -21,14 +21,14 @@ The project contains:
 
 The virtual camera uses two CoreMediaIO streams:
 
-- a `sink stream`, written by `Cam2Mac`, which delivers decoded frames from the iPhone feed into the virtual camera device
+- a `sink stream`, written by `Cam2Camera`, which delivers decoded frames from the iPhone feed into the virtual camera device
 - a `source stream`, exposed by `VirtualCameraExtension`, which is the camera stream Zoom and other macOS apps consume
 
 In other words:
 
 1. iPhone captures and sends H.264 over LAN
-2. `Cam2Mac` receives and decodes the frames
-3. `Cam2Mac` writes those frames into the virtual camera sink stream
+2. `Cam2Camera` receives and decodes the frames
+3. `Cam2Camera` writes those frames into the virtual camera sink stream
 4. `VirtualCameraExtension` forwards them to the source stream
 5. Zoom reads the source stream as a normal camera device
 
@@ -48,8 +48,8 @@ In other words:
 
 ```text
 FrontCameraContinuation/
-  FrontCameraContinuation/   iPhone sender app
-  TCPServer/                 Cam2Mac macOS receiver + virtual camera installer
+  FrontCameraContinuation/   iPhone sender app (`Cam2Camera` display name)
+  TCPServer/                 macOS receiver + virtual camera installer (`Cam2Camera` display name)
   VirtualCameraExtension/    CoreMediaIO camera extension
 scripts/
   install_cam2mac_app.sh
@@ -66,14 +66,16 @@ Open:
 FrontCameraContinuation/FrontCameraContinuation.xcodeproj
 ```
 
-You will see separate schemes for the iPhone app and the Mac app:
+You will see separate internal schemes for the iPhone and Mac targets:
 
 - `FrontCameraContinuation`
 - `Cam2Mac`
 
+Both currently build apps displayed as `Cam2Camera`.
+
 ### 2. Build and Run the Mac App
 
-Build the `Cam2Mac` scheme in Xcode, or from Terminal:
+Build the `Cam2Mac` scheme in Xcode, or from Terminal. The built app is named `Cam2Camera`:
 
 ```bash
 xcodebuild \
@@ -98,11 +100,11 @@ sudo /bin/zsh scripts/install_and_launch_cam2mac.sh Cam2Mac
 Why `/Applications` matters:
 
 - macOS system extensions are much more reliable when the host app lives in `/Applications`
-- the `Cam2Mac` UI also reminds you to move the app there before installation
+- the `Cam2Camera` UI also reminds you to move the app there before installation
 
 ### 3. Install the Virtual Camera on macOS
 
-After launching `Cam2Mac.app`:
+After launching `Cam2Camera.app`:
 
 1. Click `Install Virtual Camera`
 2. Approve the system extension if macOS asks
@@ -113,7 +115,7 @@ You can also use `Uninstall Virtual Camera` from the same Mac app later if neede
 
 ### 4. Build and Run the iPhone App
 
-Build the `FrontCameraContinuation` scheme in Xcode, then run it on a physical iPhone.
+Build the `FrontCameraContinuation` scheme in Xcode, then run it on a physical iPhone. The installed iPhone app is named `Cam2Camera`.
 
 Terminal build example:
 
@@ -132,10 +134,10 @@ When first launched on iPhone, allow camera access.
 
 ### On the Mac
 
-1. Open `Cam2Mac.app`
+1. Open `Cam2Camera.app`
 2. Click `Start` to start listening for the iPhone stream
 3. If not already installed, click `Install Virtual Camera`
-4. Keep `Cam2Mac.app` running
+4. Keep `Cam2Camera.app` running
 
 The Mac app shows:
 
@@ -148,8 +150,8 @@ The Mac app shows:
 
 ### On the iPhone
 
-1. Open `FrontCameraContinuation`
-2. Look at `Cam2Mac.app` and copy the Mac LAN IP address it shows
+1. Open `Cam2Camera`
+2. Look at `Cam2Camera.app` and copy the Mac LAN IP address it shows
 3. Enter that address in the `Mac Address` field
 4. Enter the port shown in the Mac app, which is `9999` by default
 5. Choose the video resolution
@@ -167,7 +169,7 @@ The `Mac Address` field in the iPhone UI expects the Mac's IP address on your lo
 
 It does **not** mean the hardware MAC address.
 
-In the current flow, `Cam2Mac.app` detects and displays the Mac LAN IP for you. You usually do not need to look it up manually.
+In the current flow, `Cam2Camera.app` detects and displays the Mac LAN IP for you. You usually do not need to look it up manually.
 
 If you ever need to verify it yourself, you can still find it here:
 
@@ -192,7 +194,7 @@ The Mac app listens on that port by default, and the iPhone UI also defaults to 
 
 ## Using the Virtual Camera in Zoom
 
-After `Cam2Mac` is running, the virtual camera is installed, and the iPhone stream is active:
+After `Cam2Camera` is running, the virtual camera is installed, and the iPhone stream is active:
 
 1. Open Zoom
 2. Go to `Settings` -> `Video`
@@ -204,11 +206,11 @@ The same idea works in other macOS apps that use standard camera devices.
 
 Use this order for the smoothest setup:
 
-1. Launch `Cam2Mac.app` on the Mac
+1. Launch `Cam2Camera.app` on the Mac
 2. Click `Start`
 3. Install the virtual camera if needed
 4. Launch the iPhone app
-5. Read the Mac LAN IP and port from `Cam2Mac.app`
+5. Read the Mac LAN IP and port from `Cam2Camera.app`
 6. Enter that address and port in the iPhone app
 7. Tap `Start Stream`
 8. Select the virtual camera in Zoom or another app
@@ -217,7 +219,7 @@ Use this order for the smoothest setup:
 
 ### No video on the Mac
 
-- Make sure `Cam2Mac.app` is running
+- Make sure `Cam2Camera.app` is running
 - Make sure the Mac listener is started
 - Confirm the iPhone is using the correct LAN IP address
 - Confirm both devices are on the same network
@@ -226,7 +228,7 @@ Use this order for the smoothest setup:
 ### No video in Zoom
 
 - Make sure the virtual camera is installed and activated
-- Keep `Cam2Mac.app` running while Zoom is open
+- Keep `Cam2Camera.app` running while Zoom is open
 - Start the iPhone stream before or while Zoom is selecting the camera
 - Make sure the Mac app is actively feeding the sink stream, not just sitting idle
 - Re-select the virtual camera in Zoom settings if needed

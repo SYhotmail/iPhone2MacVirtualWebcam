@@ -9,9 +9,9 @@ final class VirtualCameraInstaller: NSObject {
     private static let applicationPathPrefix = "/Applications"
     
     enum ComponentState: CustomStringConvertible {
-        case installing(needReboot: Bool)
-        case installed(enabled: Bool?)
-        case uninstalling(waitingForApproval: Bool)
+        case installing(needReboot: Bool, waitingForApproval: Bool)
+        case installed(enabled: Bool)
+        case uninstalling(needReboot: Bool, waitingForApproval: Bool)
         case uninstalled
         
         var isInstallationRelated: Bool {
@@ -26,16 +26,18 @@ final class VirtualCameraInstaller: NSObject {
             return false
         }
         
+        static let waitingForApproval = "Waiting for approval"
+        
         var description: String {
             switch self {
             case .installed(let enabled):
-                return "Installed \(enabled.map(\.description) ?? "")"
-            case .installing(let needReboot):
-                return "Installing \(needReboot ? "Reboot" : "")"
+                return "Installed \(enabled ? "" : " (disabled)")"
+            case let .installing(needReboot, waitingForApproval):
+                return "Installing \(needReboot ? "(Need to Reboot)" : "") \(waitingForApproval ? "(\(Self.waitingForApproval)" : "")"
             case .uninstalled:
                 return "Uninstalled"
-            case .uninstalling(let waitingForApproval):
-                return "Uninstalling \(waitingForApproval ? "Waiting for approval" : "")"
+            case let .uninstalling(needReboot, waitingForApproval):
+                return "Uninstalling \(needReboot ? "(Need to Reboot)" : "") \(waitingForApproval ? "(\(Self.waitingForApproval)" : "")"
             }
         }
     }
@@ -65,7 +67,11 @@ final class VirtualCameraInstaller: NSObject {
     private var isRunning = false
     @ObservationIgnored
     private(set)var detectedPropertiesSubject = CurrentValueSubject<Bool, Never>(false)
-    private var componentState: ComponentState?
+    private var componentState: ComponentState? {
+        didSet {
+            status = componentState?.description
+        }
+    }
     
     private var requestType: RequestType? {
         didSet {
@@ -210,13 +216,9 @@ final class VirtualCameraInstaller: NSObject {
 
 // MARK: - OSSystemExtensionRequestDelegate
 extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
-    static var awaitingApproval: String {
-        "Awaiting Approval"
-    }
-    
     func requestNeedsUserApproval(_ request: OSSystemExtensionRequest) {
         requestResult = nil // waiting for Approval..
-        status = Self.awaitingApproval
+        status = ComponentState.waitingForApproval
     }
 
     func request(_ request: OSSystemExtensionRequest, didFinishWithResult result: OSSystemExtensionRequest.Result) {
@@ -239,18 +241,14 @@ extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
         
         switch requestType {
         case .installing:
-            componentState = needReboot ? .installing(needReboot: true) : .installed(enabled: true)
+            componentState = needReboot ? .installing(needReboot: needReboot, waitingForApproval: false) : .installed(enabled: true)
         case .uninstalling:
-            componentState = needReboot ? .uninstalling(waitingForApproval: false) : .uninstalled
+            componentState = needReboot ? .uninstalling(needReboot: needReboot, waitingForApproval: false) : .uninstalled
         default:
             return
         }
         
         status = componentState?.description
-    }
-    
-    static func bundleShortVersions(_ version: String) -> [Int] {
-        version.split(separator: ".").compactMap { Int($0) }
     }
     
     func request(_ request: OSSystemExtensionRequest, foundProperties properties: [OSSystemExtensionProperties]) {
@@ -272,18 +270,11 @@ extension VirtualCameraInstaller: OSSystemExtensionRequestDelegate {
         let isUninstalling = property.isUninstalling
         
         if isUninstalling {
-            status = "Removing"
-            componentState = .uninstalling(waitingForApproval: isAwaitingUserApproval)
+            componentState = .uninstalling(needReboot: false, waitingForApproval: isAwaitingUserApproval)
+        } else if isAwaitingUserApproval {
+            componentState = .installing(needReboot: false, waitingForApproval: isAwaitingUserApproval)
         } else {
-            
-            if isAwaitingUserApproval {
-                status = Self.suffixed(text: "Installing", with: Self.awaitingApproval)
-                componentState = .installing(needReboot: false)
-            } else {
-                status = isEnabled ? "Installed" : Self.suffixed(text: "Installed", with: "disabled")
-                componentState = .installed(enabled: isEnabled)
-            }
-        
+            componentState = .installed(enabled: isEnabled)
         }
     }
     
