@@ -20,7 +20,6 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
     
     private let lock = Mutex(())
     
-
     init(localizedName: String) {
         var formatDescription: CMFormatDescription?
         CMVideoFormatDescriptionCreate(

@@ -103,7 +103,7 @@ struct ConnectView: View {
     private var headerCard: some View {
         HStack(alignment: .top, spacing: ConnectViewLayout.headerSpacing) {
             VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
-                Text("\(VirtualCameraConfiguration.deviceName) Receiver")
+                Text("Remote Camera Receiver")
                     .font(.title.weight(.bold))
                     .fontDesign(.rounded)
                     .foregroundStyle(palette.primaryText)
