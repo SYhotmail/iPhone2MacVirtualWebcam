@@ -90,6 +90,10 @@ final class ContentViewModel {
         cameraStreamer.preparePreview(position: cameraPosition.avPosition,
                                       preset: streamSize.sessionPreset)
     }
+    
+    var isStreamingText: String {
+        isStreaming ? "Sending the camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac."
+    }
 
     // MARK: - Actions
 

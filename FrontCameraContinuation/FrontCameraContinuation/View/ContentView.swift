@@ -162,7 +162,7 @@ struct ContentView: View {
             Text("Preview")
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white)
-            Text(viewModel.isStreaming ? "Sending the front camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac.")
+            Text(viewModel.isStreamingText)
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.82))
                 .fixedSize(horizontal: false, vertical: true)

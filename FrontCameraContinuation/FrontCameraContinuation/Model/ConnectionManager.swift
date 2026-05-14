@@ -4,6 +4,13 @@ import Network
 
 nonisolated
 final class ConnectionManager: @unchecked Sendable {
+    enum Status: Equatable, Sendable {
+        case idle
+        case connecting
+        case connected
+        case failed
+    }
+
     private var connection: NWConnection? {
         didSet {
             guard let oldValue, oldValue !== connection else {
@@ -15,48 +22,54 @@ final class ConnectionManager: @unchecked Sendable {
     private var currentHost: String?
     private var currentPort: UInt16?
 
-    private var isConnected = false {
+    private var status: Status = .idle {
         didSet {
-            guard oldValue != isConnected else { return }
-            onConnectionChaged?(isConnected)
+            guard oldValue != status else {
+                return
+            }
+            onConnectionStatusChanged?(status)
+            onConnectionChaged?(status == .connected)
         }
     }
-    
-    var onConnectionFailed: (@Sendable () -> Void)!
+
     var onConnectionChaged: (@Sendable (Bool) -> Void)! {
         didSet {
             guard let onConnectionChaged else { return }
-            onConnectionChaged(isConnected)
+            onConnectionChaged(status == .connected)
         }
     }
+    var onConnectionStatusChanged: (@Sendable (Status) -> Void)!
     
     @discardableResult
     func connect(host: String, port: UInt16) -> Bool {
         guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+            status = .failed
             return false
         }
 
         currentHost = host
         currentPort = port
         connection = nil
+        status = .connecting
 
         let endpoint = NWEndpoint.Host(host)
         let connection = NWConnection(host: endpoint, port: nwPort, using: .tcp)
 
         connection.stateUpdateHandler = { [weak self] newState in
             debugPrint("!!! New State \(newState)")
-            let isReady: Bool
-            if case .ready = newState {
-                isReady = true
-            } else {
-                isReady = false
-            }
-            
             guard let self else { return }
-            if case .failed = newState {
-                self.onConnectionFailed?()
+            switch newState {
+            case .setup, .preparing, .waiting:
+                self.status = .connecting
+            case .ready:
+                self.status = .connected
+            case .failed:
+                self.status = .failed
+            case .cancelled:
+                self.status = .idle
+            @unknown default:
+                self.status = .connecting
             }
-            self.isConnected = isReady
         }
         connection.pathUpdateHandler = { newPath in
             debugPrint("!!! New Path \(newPath.debugDescription)")
@@ -83,7 +96,11 @@ final class ConnectionManager: @unchecked Sendable {
 
     func disconnect() {
         connection = nil
-        isConnected = false
+        status = .idle
+    }
+
+    func disconnectPreservingStatus() {
+        connection = nil
     }
 
     func send(_ data: Data) {

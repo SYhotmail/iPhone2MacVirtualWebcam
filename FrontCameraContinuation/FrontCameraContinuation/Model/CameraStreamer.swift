@@ -12,11 +12,14 @@ import Combine
 
 nonisolated
 final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOutputSampleBufferDelegate {
+    typealias ConnectionStatus = ConnectionManager.Status
+
     private let captureSessionManager = CaptureSessionManager()
     private let connectionManager = ConnectionManager()
     private let encoder = H264Encoder()
     private var shouldAutoResume = false
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
+    let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(.idle)
     
     var session: AVCaptureSession {
         captureSessionManager.session
@@ -38,11 +41,14 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
     
     private func bindConnectionManager() {
-        connectionManager.onConnectionFailed = { [weak self] in
-            self?.stopStreaming()
-        }
         connectionManager.onConnectionChaged = { [weak self] isConnected in
             self?.isConnectedPublisher.value = isConnected
+        }
+        connectionManager.onConnectionStatusChanged = { [weak self] status in
+            self?.connectionStatusPublisher.value = status
+            if status == .failed {
+                self?.handleConnectionFailure()
+            }
         }
     }
     
@@ -125,6 +131,12 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     private func disconnect() {
         encoderInvalidate()
         connectionManager.disconnect()
+    }
+
+    private func handleConnectionFailure() {
+        shouldAutoResume = false
+        encoderInvalidate()
+        connectionManager.disconnectPreservingStatus()
     }
 
     private func stopCaptureAndConnection() {
