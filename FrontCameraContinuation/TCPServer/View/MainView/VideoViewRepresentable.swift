@@ -38,14 +38,8 @@ struct VideoViewRepresentable: NSViewRepresentable {
     }
     
     final class Coordinator: NSObject {
-        var cancellable: AnyCancellable? {
-            didSet {
-                guard let oldValue, oldValue != cancellable else {
-                    return
-                }
-                oldValue.cancel()
-            }
-        }
+        @Cancelling
+        var cancellable: AnyCancellable?
         
         
         func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {

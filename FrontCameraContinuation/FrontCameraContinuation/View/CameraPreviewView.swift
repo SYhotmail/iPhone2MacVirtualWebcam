@@ -142,3 +142,4 @@ final class PreviewView: UIView {
         connection.videoRotationAngle = angle
     }
 }
+

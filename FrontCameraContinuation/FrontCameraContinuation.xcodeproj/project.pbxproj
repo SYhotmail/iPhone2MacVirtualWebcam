@@ -58,6 +58,7 @@
 		21583F262FA3EDEC00FCF073 /* Exceptions for "Shared" folder in "FrontCameraContinuation" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				CancellablePropertyWrapper.swift,
 				VirtualCameraConfiguration.swift,
 			);
 			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;

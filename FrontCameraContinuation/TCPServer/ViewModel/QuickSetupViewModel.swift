@@ -26,14 +26,8 @@ final class QuickSetupViewModel {
     }
     
     @ObservationIgnored
-    private var cancellable: AnyCancellable! {
-        didSet {
-            guard let oldValue, oldValue !== cancellable else {
-                return
-            }
-            oldValue.cancel()
-        }
-    }
+    @Cancelling
+    private var cancellable: AnyCancellable!
     
     private(set)var steps = [Step]()
     

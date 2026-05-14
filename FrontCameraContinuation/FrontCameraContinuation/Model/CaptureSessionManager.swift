@@ -25,14 +25,7 @@ final class CaptureSessionManager {
     }
     
     private var notificationCancellables = Set<AnyCancellable>(minimumCapacity: 3)
-    private var orientationCancellable: AnyCancellable? {
-        didSet {
-            guard let oldValue, oldValue !== orientationCancellable else {
-                return
-            }
-            oldValue.cancel()
-        }
-    }
+    private var orientationCancellable: AnyCancellable?
     
     private let logger: Logger?
     let preferedFrameDuration: CMTime
