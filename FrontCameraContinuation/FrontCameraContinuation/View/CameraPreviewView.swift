@@ -5,17 +5,20 @@ import UIKit
 
 struct CameraPreviewView: UIViewRepresentable {
     let session: AVCaptureSession
+    var onPreviewViewUpdate: ((PreviewView) -> Void)?
     
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
         view.previewLayer.videoGravity = .resizeAspect
         defineUIView(view)
+        onPreviewViewUpdate?(view)
         return view
     }
 
     func updateUIView(_ uiView: PreviewView, context: Context) {
         context.coordinator.defineView(uiView)
         defineUIView(uiView)
+        onPreviewViewUpdate?(uiView)
     }
     
     private func defineUIView(_ uiView: PreviewView) {
@@ -67,7 +70,6 @@ struct CameraPreviewView: UIViewRepresentable {
                 break
             }
         }
-        
     }
 }
 
@@ -142,4 +144,3 @@ final class PreviewView: UIView {
         connection.videoRotationAngle = angle
     }
 }
-

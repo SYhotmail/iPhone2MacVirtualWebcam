@@ -2,7 +2,9 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = ContentViewModel()
+    @State private var pictureInPictureController = CameraPreviewPIPController()
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -19,6 +21,10 @@ struct ContentView: View {
             backgroundGradient
                 .ignoresSafeArea()
 
+            if viewModel.isStreamingRequested && !viewModel.isPreviewVisible {
+                pipSourcePreview
+            }
+
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
                     headerSection
@@ -34,9 +40,34 @@ struct ContentView: View {
             }
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.88), value: viewModel.isPreviewVisible)
+        .onAppear {
+            pictureInPictureController.updateSession(viewModel.previewSession)
+            pictureInPictureController.updateStreamingState(isStreaming: viewModel.isStreamingRequested)
+        }
+        .onChange(of: viewModel.isStreamingRequested) { _, isStreamingRequested in
+            pictureInPictureController.updateStreamingState(isStreaming: isStreamingRequested)
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            pictureInPictureController.handleScenePhaseChange(newPhase)
+        }
+        .onChange(of: viewModel.isPreviewVisible) { _, isPreviewVisible in
+            if !isPreviewVisible && !viewModel.isStreamingRequested {
+                pictureInPictureController.clearSourceView()
+            }
+        }
         .onTapGesture {
             focusedField = nil
         }
+    }
+
+    private var pipSourcePreview: some View {
+        CameraPreviewView(session: viewModel.previewSession) { previewView in
+            pictureInPictureController.attachSourceView(previewView)
+        }
+        .frame(width: 2, height: 2)
+        .opacity(0.01)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var backgroundGradient: LinearGradient {
@@ -137,7 +168,9 @@ struct ContentView: View {
     }
 
     private var previewSection: some View {
-        CameraPreviewView(session: viewModel.previewSession)
+        CameraPreviewView(session: viewModel.previewSession) { previewView in
+            pictureInPictureController.attachSourceView(previewView)
+        }
             .overlay(alignment: .bottomLeading) {
                 previewSummary
                     .padding(16)
