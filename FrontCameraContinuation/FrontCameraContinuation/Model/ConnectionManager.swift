@@ -55,15 +55,21 @@ final class ConnectionManager: @unchecked Sendable {
         let endpoint = NWEndpoint.Host(host)
         let connection = NWConnection(host: endpoint, port: nwPort, using: .tcp)
 
-        connection.stateUpdateHandler = { [weak self] newState in
+        connection.stateUpdateHandler = { [weak self, connection] newState in
             debugPrint("!!! New State \(newState)")
             guard let self else { return }
+            guard self.connection === connection else {
+                return
+            }
             switch newState {
-            case .setup, .preparing, .waiting:
+            case .setup, .preparing:
                 self.status = .connecting
+            case .waiting(let error):
+                debugPrint("!!! Connection waiting: \(error)")
+                self.status = .failed
             case .ready:
                 self.status = .connected
-            case .failed:
+            case .failed(_):
                 self.status = .failed
             case .cancelled:
                 self.status = .idle
@@ -107,7 +113,7 @@ final class ConnectionManager: @unchecked Sendable {
         let packet = packetizedData(data)
         connection?.send(content: packet, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ error in
             guard let error else { return }
-            debugPrint("!!! Error: \(error.localizedDescription)")
+            debugPrint("❌ Error: \(error.localizedDescription)")
             _ = error.errorCode == 57 || error.errorCode == 54
         }))
     }

@@ -7,6 +7,13 @@ import UIKit
 
 @Observable
 final class ContentViewModel {
+    enum StreamStatus: Equatable {
+        case idle
+        case connecting
+        case streaming
+        case attentionNeeded
+    }
+
     enum Constants {
         static let hostKey = "host"
         static let portKey = "port"
@@ -57,8 +64,9 @@ final class ContentViewModel {
         }
     }
     
-    private var connectionCancellable: AnyCancellable?
+    private var cancellables = Set<AnyCancellable>()
     private(set)var isPreviewVisible = false
+    private(set) var streamStatus: StreamStatus = .idle
     private(set)var isStreaming = false {
         didSet {
             guard oldValue != isStreaming else {
@@ -92,7 +100,68 @@ final class ContentViewModel {
     }
     
     var isStreamingText: String {
-        isStreaming ? "Sending the camera feed to your Mac right now." : "Camera is warmed up so you can frame the shot before sending it to your Mac."
+        switch streamStatus {
+        case .idle:
+            return "Camera is warmed up so you can frame the shot before sending it to your Mac."
+        case .connecting:
+            return "Trying to reach your Mac now. Keep the app open until the connection turns live."
+        case .streaming:
+            return "Sending the camera feed to your Mac right now."
+        case .attentionNeeded:
+            return "We lost the connection before the stream went live. Check the Mac address, port, and receiver status, then try again."
+        }
+    }
+
+    var statusTitle: String {
+        switch streamStatus {
+        case .idle:
+            return "Ready"
+        case .connecting:
+            return "Connecting"
+        case .streaming:
+            return "Live"
+        case .attentionNeeded:
+            return "Check Connection"
+        }
+    }
+
+    var statusDetail: String {
+        switch streamStatus {
+        case .idle:
+            return "Preview is available and the stream is not running."
+        case .connecting:
+            return "Trying to connect to your Mac receiver."
+        case .streaming:
+            return "Your Mac is receiving the camera feed."
+        case .attentionNeeded:
+            return "The Mac receiver did not accept the stream."
+        }
+    }
+
+    var primaryActionTitle: String {
+        switch streamStatus {
+        case .streaming:
+            return "Stop Stream"
+        case .attentionNeeded:
+            return "Retry Stream"
+        case .idle, .connecting:
+            return "Start Stream"
+        }
+    }
+
+    var primaryActionSymbol: String {
+        switch streamStatus {
+        case .streaming:
+            return "stop.fill"
+        case .attentionNeeded:
+            return "arrow.clockwise"
+        case .idle, .connecting:
+            return "bolt.fill"
+        }
+    }
+
+    var isStartingConnection: Bool {
+        streamStatus == .connecting
     }
 
     // MARK: - Actions
@@ -115,26 +184,41 @@ final class ContentViewModel {
     func startStreaming() {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let portValue = UInt16(port) ?? Constants.defaultPort
-        
-        isStreaming = cameraStreamer.startStreaming(
+
+        streamStatus = .connecting
+        let didStart = cameraStreamer.startStreaming(
             host: trimmedHost,
             port: portValue,
             position: cameraPosition.avPosition,
             preset: streamSize.sessionPreset
         )
+
+        if !didStart {
+            isStreaming = false
+            streamStatus = .attentionNeeded
+        }
     }
 
     func stopStreaming() {
         cameraStreamer.stopStreaming()
         isStreaming = false
+        streamStatus = .idle
     }
 
     private func bind() {
-        connectionCancellable = cameraStreamer.isConnectedPublisher
+        cameraStreamer.isConnectedPublisher
             .receive(on: DispatchQueue.main)
             .sink { [weak self] isConnected in
                 self?.isStreaming = isConnected
             }
+            .store(in: &cancellables)
+
+        cameraStreamer.connectionStatusPublisher
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] status in
+                self?.applyConnectionStatus(status)
+            }
+            .store(in: &cancellables)
     }
 
     func supportedCameraStreamSizes() -> [StreamSize] {
@@ -157,5 +241,21 @@ final class ContentViewModel {
             UIApplication.shared.isIdleTimerDisabled = isIdleTimerDisabled
         }
 #endif
+    }
+
+    private func applyConnectionStatus(_ status: CameraStreamer.ConnectionStatus) {
+        switch status {
+        case .idle:
+            if !isStreaming {
+                streamStatus = .idle
+            }
+        case .connecting:
+            streamStatus = .connecting
+        case .connected:
+            streamStatus = .streaming
+        case .failed:
+            isStreaming = false
+            streamStatus = .attentionNeeded
+        }
     }
 }

@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -159,7 +158,7 @@ struct ContentView: View {
 
     private var previewSummary: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Preview")
+            Text(viewModel.statusTitle)
                 .font(.headline.weight(.semibold))
                 .foregroundStyle(.white)
             Text(viewModel.isStreamingText)
@@ -185,12 +184,12 @@ struct ContentView: View {
             }
             .accessibilityLabel("Hide preview")
 
-            Text(viewModel.isStreaming ? "LIVE" : "READY")
+            Text(viewModel.statusTitle.uppercased())
                 .font(.caption.weight(.bold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
-                .background(viewModel.isStreaming ? Color.red : Color.black.opacity(0.45), in: Capsule())
+                .background(previewStatusColor, in: Capsule())
         }
     }
 
@@ -223,9 +222,9 @@ struct ContentView: View {
 
             Button(action: toggleStreaming) {
                 HStack(spacing: 10) {
-                    Image(systemName: viewModel.isStreaming ? "stop.fill" : "bolt.fill")
+                    Image(systemName: viewModel.primaryActionSymbol)
                         .font(.headline)
-                    Text(viewModel.isStreaming ? "Stop Stream" : "Start Stream")
+                    Text(viewModel.primaryActionTitle)
                         .font(.headline.weight(.semibold))
                 }
                 .foregroundStyle(.white)
@@ -243,6 +242,10 @@ struct ContentView: View {
                 )
                 .shadow(color: .black.opacity(0.22), radius: 20, y: 10)
             }
+            .disabled(viewModel.isStartingConnection)
+            .opacity(viewModel.isStartingConnection ? 0.72 : 1)
+
+            statusPanel
 
             Text("Tip: keep this preview open while you adjust framing. The stream will reconnect automatically after minor interruptions.")
                 .font(.footnote)
@@ -260,15 +263,43 @@ struct ContentView: View {
     private var statusBadge: some View {
         HStack(spacing: 8) {
             Circle()
-                .fill(viewModel.isStreaming ? Color.green : Color.yellow)
+                .fill(statusColor)
                 .frame(width: 10, height: 10)
-            Text(viewModel.isStreaming ? "Connected" : "Standby")
+            Text(viewModel.statusTitle)
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(primaryTextColor)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(cardBackgroundColor, in: Capsule())
+    }
+
+    private var statusPanel: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: statusSymbol)
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(statusColor)
+                .frame(width: 20, height: 20)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(viewModel.statusTitle)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(primaryTextColor)
+
+                Text(viewModel.statusDetail)
+                    .font(.footnote)
+                    .foregroundStyle(secondaryTextColor)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(fieldBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(fieldBorderColor, lineWidth: 1)
+        }
     }
 
     @ViewBuilder
@@ -334,6 +365,45 @@ struct ContentView: View {
 
     private var fieldBorderColor: Color {
         palette.fieldBorder
+    }
+
+    private var statusColor: Color {
+        switch viewModel.streamStatus {
+        case .idle:
+            return Color.yellow
+        case .connecting:
+            return Color.orange
+        case .streaming:
+            return Color.green
+        case .attentionNeeded:
+            return Color.red
+        }
+    }
+
+    private var previewStatusColor: Color {
+        switch viewModel.streamStatus {
+        case .idle:
+            return Color.black.opacity(0.45)
+        case .connecting:
+            return Color.orange.opacity(0.85)
+        case .streaming:
+            return Color.red
+        case .attentionNeeded:
+            return Color.red.opacity(0.82)
+        }
+    }
+
+    private var statusSymbol: String {
+        switch viewModel.streamStatus {
+        case .idle:
+            return "pause.circle.fill"
+        case .connecting:
+            return "antenna.radiowaves.left.and.right.circle.fill"
+        case .streaming:
+            return "dot.radiowaves.left.and.right"
+        case .attentionNeeded:
+            return "exclamationmark.triangle.fill"
+        }
     }
 
     private func toggleStreaming() {
