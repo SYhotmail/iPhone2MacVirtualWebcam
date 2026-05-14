@@ -30,9 +30,14 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
     let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(.idle)
     let isStreamingRequestedPublisher = CurrentValueSubject<Bool, Never>(false)
+    private let previewSampleBufferSubject = PassthroughSubject<CMSampleBuffer, Never>()
     
     var session: AVCaptureSession {
         captureSessionManager.session
+    }
+
+    var previewSampleBufferPublisher: AnyPublisher<CMSampleBuffer, Never> {
+        previewSampleBufferSubject.eraseToAnyPublisher()
     }
 
     override init() {
@@ -184,6 +189,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         guard shouldAutoResume else { return }
+        previewSampleBufferSubject.send(sampleBuffer)
         encoder.encode(sampleBuffer)
     }
 }

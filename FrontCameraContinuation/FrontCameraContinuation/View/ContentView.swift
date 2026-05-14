@@ -1,10 +1,10 @@
+import AVKit
 import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = ContentViewModel()
-    @State private var pictureInPictureController = CameraPreviewPIPController()
+    @State private var pipController = CameraPreviewPIPController()
     @FocusState private var focusedField: Field?
 
     private enum Field {
@@ -20,10 +20,6 @@ struct ContentView: View {
         ZStack {
             backgroundGradient
                 .ignoresSafeArea()
-
-            if viewModel.isStreamingRequested && !viewModel.isPreviewVisible {
-                pipSourcePreview
-            }
 
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
@@ -41,33 +37,15 @@ struct ContentView: View {
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.88), value: viewModel.isPreviewVisible)
         .onAppear {
-            pictureInPictureController.updateSession(viewModel.previewSession)
-            pictureInPictureController.updateStreamingState(isStreaming: viewModel.isStreamingRequested)
+            pipController.bindSampleBuffers(viewModel.cameraStreamer.previewSampleBufferPublisher)
+            pipController.updateStreamingState(viewModel.isStreamingRequested)
         }
         .onChange(of: viewModel.isStreamingRequested) { _, isStreamingRequested in
-            pictureInPictureController.updateStreamingState(isStreaming: isStreamingRequested)
-        }
-        .onChange(of: scenePhase) { _, newPhase in
-            pictureInPictureController.handleScenePhaseChange(newPhase)
-        }
-        .onChange(of: viewModel.isPreviewVisible) { _, isPreviewVisible in
-            if !isPreviewVisible && !viewModel.isStreamingRequested {
-                pictureInPictureController.clearSourceView()
-            }
+            pipController.updateStreamingState(isStreamingRequested)
         }
         .onTapGesture {
             focusedField = nil
         }
-    }
-
-    private var pipSourcePreview: some View {
-        CameraPreviewView(session: viewModel.previewSession) { previewView in
-            pictureInPictureController.attachSourceView(previewView)
-        }
-        .frame(width: 2, height: 2)
-        .opacity(0.01)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     private var backgroundGradient: LinearGradient {
@@ -168,9 +146,7 @@ struct ContentView: View {
     }
 
     private var previewSection: some View {
-        CameraPreviewView(session: viewModel.previewSession) { previewView in
-            pictureInPictureController.attachSourceView(previewView)
-        }
+        CameraPreviewView(session: viewModel.previewSession)
             .overlay(alignment: .bottomLeading) {
                 previewSummary
                     .padding(16)
@@ -216,6 +192,21 @@ struct ContentView: View {
                     .background(.black.opacity(0.34), in: Circle())
             }
             .accessibilityLabel("Hide preview")
+
+            if pipController.isSupported {
+                Button {
+                    pipController.start()
+                } label: {
+                    Image(systemName: "pip.enter")
+                        .font(.subheadline.weight(.bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(.black.opacity(0.34), in: Circle())
+                }
+                .accessibilityLabel("Start Picture in Picture")
+                .disabled(!viewModel.isStreamingRequested)
+                .opacity(viewModel.isStreamingRequested ? 1 : 0.45)
+            }
 
             Text(viewModel.statusTitle.uppercased())
                 .font(.caption.weight(.bold))

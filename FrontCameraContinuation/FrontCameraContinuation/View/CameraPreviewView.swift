@@ -57,15 +57,15 @@ struct CameraPreviewView: UIViewRepresentable {
         }
         
         @objc private func handleDoubleTap(sender: UITapGestureRecognizer) {
-            guard let view = sender.view as? PreviewView else {
+            guard let view = sender.view as? PreviewView, let previewLayer = view.previewLayer else {
                 return
             }
             
-            switch view.previewLayer.videoGravity {
+            switch previewLayer.videoGravity {
             case .resizeAspect:
-                view.previewLayer.videoGravity = .resizeAspectFill
+                previewLayer.videoGravity = .resizeAspectFill
             case .resizeAspectFill:
-                view.previewLayer.videoGravity = .resizeAspect
+                previewLayer.videoGravity = .resizeAspect
             default:
                 break
             }
