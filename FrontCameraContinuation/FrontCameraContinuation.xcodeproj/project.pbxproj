@@ -63,6 +63,13 @@
 			);
 			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
 		};
+		21E2DC7C2FB6294200D5DBE2 /* Exceptions for "TCPServer" folder in "FrontCameraContinuation" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"Extensions/Publisher+Ext.swift",
+			);
+			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -81,6 +88,9 @@
 		};
 		215482D72F9143A900163538 /* TCPServer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				21E2DC7C2FB6294200D5DBE2 /* Exceptions for "TCPServer" folder in "FrontCameraContinuation" target */,
+			);
 			path = TCPServer;
 			sourceTree = "<group>";
 		};

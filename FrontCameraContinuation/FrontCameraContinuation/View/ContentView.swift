@@ -137,7 +137,7 @@ struct ContentView: View {
     }
 
     private var previewSection: some View {
-        CameraPreviewView(session: viewModel.previewSession)
+        CameraPreviewView(frameProvider: viewModel.cameraStreamer)
             .overlay(alignment: .bottomLeading) {
                 previewSummary
                     .padding(16)
