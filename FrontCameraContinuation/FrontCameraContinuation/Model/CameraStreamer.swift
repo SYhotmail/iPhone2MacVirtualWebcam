@@ -17,9 +17,19 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     private let captureSessionManager = CaptureSessionManager()
     private let connectionManager = ConnectionManager()
     private let encoder = H264Encoder()
+    private let reconnectQueue = DispatchQueue(label: "camera.streamer.reconnect", qos: .utility)
+    private var reconnectWorkItem: DispatchWorkItem? {
+        didSet {
+            guard let oldValue, oldValue !== reconnectWorkItem else {
+                return
+            }
+            oldValue.cancel()
+        }
+    }
     private var shouldAutoResume = false
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
     let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(.idle)
+    let isStreamingRequestedPublisher = CurrentValueSubject<Bool, Never>(false)
     
     var session: AVCaptureSession {
         captureSessionManager.session
@@ -77,6 +87,8 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
 
     func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) -> Bool {
         shouldAutoResume = true
+        isStreamingRequestedPublisher.value = true
+        cancelPendingReconnect()
 
         let connected = connectionManager.connect(host: host, port: port)
         assert(connected)
@@ -89,6 +101,8 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     
     func stopStreaming() {
         shouldAutoResume = false
+        isStreamingRequestedPublisher.value = false
+        cancelPendingReconnect()
         disconnect()
     }
 
@@ -122,6 +136,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     private func restartStreamingAfterCaptureRecovery() {
         guard shouldAutoResume else { return }
 
+        cancelPendingReconnect()
         encoderInvalidate()
         _ = connectionManager.reconnectCurrent()
 
@@ -134,9 +149,28 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
 
     private func handleConnectionFailure() {
-        shouldAutoResume = false
+        guard shouldAutoResume else { return }
         encoderInvalidate()
         connectionManager.disconnectPreservingStatus()
+        scheduleReconnect()
+    }
+
+    private func scheduleReconnect() {
+        guard shouldAutoResume else { return }
+
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, self.shouldAutoResume else {
+                return
+            }
+
+            _ = self.connectionManager.reconnectCurrent()
+        }
+        reconnectWorkItem = workItem
+        reconnectQueue.asyncAfter(deadline: .now() + 1.5, execute: workItem)
+    }
+
+    private func cancelPendingReconnect() {
+        reconnectWorkItem = nil
     }
 
     private func stopCaptureAndConnection() {

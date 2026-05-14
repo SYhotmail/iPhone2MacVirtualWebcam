@@ -234,7 +234,7 @@ struct ContentView: View {
                     LinearGradient(
                         colors: viewModel.isStreaming
                             ? palette.stopActionColors
-                            : palette.startActionColors,
+                            : (viewModel.isStreamingRequested ? palette.stopActionColors : palette.startActionColors),
                         startPoint: .leading,
                         endPoint: .trailing
                     ),
@@ -242,15 +242,7 @@ struct ContentView: View {
                 )
                 .shadow(color: .black.opacity(0.22), radius: 20, y: 10)
             }
-            .disabled(viewModel.isStartingConnection)
-            .opacity(viewModel.isStartingConnection ? 0.72 : 1)
 
-            statusPanel
-
-            Text("Tip: keep this preview open while you adjust framing. The stream will reconnect automatically after minor interruptions.")
-                .font(.footnote)
-                .foregroundStyle(secondaryTextColor)
-                .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(20)
         .background(cardBackgroundColor, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -272,34 +264,6 @@ struct ContentView: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
         .background(cardBackgroundColor, in: Capsule())
-    }
-
-    private var statusPanel: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Image(systemName: statusSymbol)
-                .font(.headline.weight(.semibold))
-                .foregroundStyle(statusColor)
-                .frame(width: 20, height: 20)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(viewModel.statusTitle)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(primaryTextColor)
-
-                Text(viewModel.statusDetail)
-                    .font(.footnote)
-                    .foregroundStyle(secondaryTextColor)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(14)
-        .background(fieldBackgroundColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(fieldBorderColor, lineWidth: 1)
-        }
     }
 
     @ViewBuilder
@@ -373,6 +337,8 @@ struct ContentView: View {
             return Color.yellow
         case .connecting:
             return Color.orange
+        case .waitingForReceiver:
+            return Color.orange
         case .streaming:
             return Color.green
         case .attentionNeeded:
@@ -386,23 +352,12 @@ struct ContentView: View {
             return Color.black.opacity(0.45)
         case .connecting:
             return Color.orange.opacity(0.85)
+        case .waitingForReceiver:
+            return Color.orange.opacity(0.85)
         case .streaming:
             return Color.red
         case .attentionNeeded:
             return Color.red.opacity(0.82)
-        }
-    }
-
-    private var statusSymbol: String {
-        switch viewModel.streamStatus {
-        case .idle:
-            return "pause.circle.fill"
-        case .connecting:
-            return "antenna.radiowaves.left.and.right.circle.fill"
-        case .streaming:
-            return "dot.radiowaves.left.and.right"
-        case .attentionNeeded:
-            return "exclamationmark.triangle.fill"
         }
     }
 

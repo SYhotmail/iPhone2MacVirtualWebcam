@@ -15,7 +15,6 @@ import CoreVideo
 
 nonisolated
 final class TCPServer: @unchecked Sendable {
-
     var onFrame: ((Data) -> Void)?
     var onStreamUnavailable: (() -> Void)?
     
