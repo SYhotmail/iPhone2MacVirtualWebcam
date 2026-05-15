@@ -5,6 +5,7 @@ struct ContentView: View {
     @State private var viewModel = ContentViewModel()
     @FocusState private var focusedField: Field?
     @Namespace private var namespace
+    let previewId = "preview"
     
     private enum Field {
         case host
@@ -25,21 +26,20 @@ struct ContentView: View {
                     headerSection
                     if viewModel.isPreviewVisible {
                         previewSection
-                            .matchedTransitionSource(id: "preview", in: namespace)
+                            .matchedTransitionSource(id: previewId, in: namespace)
                             .transition(.slide.combined(with: .opacity))
                     }
                     controlsSection
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 20)
-                .padding(.bottom, 28)
+                .padding(20)
+                .padding(.bottom, 28 - 20)
             }
         }
         .animation(.spring(response: 0.38, dampingFraction: 0.88),
                    value: viewModel.isPreviewVisible)
         .fullScreenCover(isPresented: $viewModel.showFullScreenPreview,
                         content: {
-            CameraPreviewView(frameProvider: viewModel.cameraStreamer)
+            cameraPreview
             // TODO: add buttons..
                 .overlay(alignment: .topTrailing) {
                     Button {
@@ -57,7 +57,7 @@ struct ContentView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(edges: .horizontal.union(.bottom))
-                .navigationTransition(.zoom(sourceID: "preview",
+                .navigationTransition(.zoom(sourceID: previewId,
                                             in: namespace))
         })
         .onTapGesture {
@@ -165,9 +165,13 @@ struct ContentView: View {
             }
         }
     }
+    
+    private var cameraPreview: some View {
+        CameraPreviewView(frameProvider: viewModel.cameraStreamer)
+    }
 
     private var previewSection: some View {
-        CameraPreviewView(frameProvider: viewModel.cameraStreamer)
+        cameraPreview
             .overlay(alignment: .bottomLeading) {
                 previewSummary
                     .padding(16)
@@ -273,7 +277,6 @@ struct ContentView: View {
                 )
                 .shadow(color: .black.opacity(0.22), radius: 20, y: 10)
             }
-
         }
         .padding(20)
         .background(cardBackgroundColor, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
@@ -296,27 +299,30 @@ struct ContentView: View {
         .padding(.vertical, 10)
         .background(cardBackgroundColor, in: Capsule())
     }
+    
+    @ViewBuilder
+    private func featureChipCore(title: String?,
+                                 font: Font,
+                                 systemImage: String?) -> some View {
+        if let title, systemImage == nil {
+            Text(title)
+        } else if let systemImage, title == nil {
+            Image(systemName: systemImage)
+        } else if let title, let systemImage {
+            Label(title, systemImage: systemImage)
+        }
+    }
 
     @ViewBuilder
     private func featureChip(title: String?,
                              font: Font = .footnote,
                              systemImage: String?) -> some View {
-        if let title, systemImage == nil {
-            Text(title)
-                .font(font)
-                .fontWeight(.semibold)
-                .foregroundStyle(primaryTextColor)
-        } else if let systemImage, title == nil {
-            Image(systemName: systemImage)
-                .font(font)
-                .fontWeight(.semibold)
-                .foregroundStyle(primaryTextColor)
-        } else if let title, let systemImage {
-            Label(title, systemImage: systemImage)
-                .font(font)
-                .fontWeight(.semibold)
-                .foregroundStyle(primaryTextColor)
-        }
+        featureChipCore(title: title,
+                        font: font,
+                        systemImage: systemImage)
+            .font(font)
+            .fontWeight(.semibold)
+            .foregroundStyle(primaryTextColor)
     }
 
     private func settingField(title: String, systemImage: String, prompt: String, text: Binding<String>) -> some View {
