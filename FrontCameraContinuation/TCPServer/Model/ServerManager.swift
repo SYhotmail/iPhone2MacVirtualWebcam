@@ -11,10 +11,6 @@ import CoreMedia
 import Network
 import Synchronization
 
-protocol PreviewDecodedFrameProvidable {
-   nonisolated func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never>
-}
-
 nonisolated
 final class ServerManager: @unchecked Sendable {
     private let server = TCPServer()

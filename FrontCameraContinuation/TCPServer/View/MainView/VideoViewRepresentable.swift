@@ -11,7 +11,9 @@ import Combine
 import CoreMedia
 internal import AVFoundation
 
-struct VideoViewRepresentable: NSViewRepresentable {
+struct VideoViewRepresentable: PlatformNativeViewRepresentable {
+    typealias NSViewType = VideoView
+    
     let frameProvider: any PreviewDecodedFrameProvidable
     
     private func defineVideoView(_ nsView: VideoView, context: Context) {
@@ -19,17 +21,17 @@ struct VideoViewRepresentable: NSViewRepresentable {
         coordinator.bind(frameProvider: frameProvider, renderer: nsView.sampleBufferRenderer)
     }
     
-    func makeNSView(context: Context) -> VideoView {
+    func makePlatformView(context: Context) -> PlatformViewType {
         let view = VideoView(frame: .zero)
         defineVideoView(view, context: context)
         return view
     }
 
-    func updateNSView(_ nsView: VideoView, context: Context) {
-        defineVideoView(nsView, context: context)
+    func updatePlatformView(_ view: PlatformViewType, context: Context) {
+        defineVideoView(view, context: context)
     }
     
-    static func dismantleNSView(_ nsView: VideoView, coordinator: Coordinator) {
+    static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
         coordinator.cancellable = nil
     }
     

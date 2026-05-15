@@ -59,6 +59,9 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				CancellablePropertyWrapper.swift,
+				PreviewDecodedFrameProvidable.swift,
+				"Publisher+Ext.swift",
+				ViewRepresentable.swift,
 				VirtualCameraConfiguration.swift,
 			);
 			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;

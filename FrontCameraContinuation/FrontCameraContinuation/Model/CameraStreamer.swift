@@ -11,7 +11,11 @@ import UIKit
 import Combine
 
 nonisolated
-final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOutputSampleBufferDelegate {
+final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOutputSampleBufferDelegate, PreviewDecodedFrameProvidable {
+    func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never> {
+        sampleBufferPublisher.eraseToAnyPublisher()
+    }
+    
     typealias ConnectionStatus = ConnectionManager.Status
 
     private let captureSessionManager = CaptureSessionManager()
@@ -26,6 +30,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
             oldValue.cancel()
         }
     }
+    private let sampleBufferPublisher = PassthroughSubject<CMSampleBuffer, Never>()
     private var shouldAutoResume = false
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
     let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(.idle)
@@ -183,6 +188,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
+        sampleBufferPublisher.send(sampleBuffer)
         guard shouldAutoResume else { return }
         encoder.encode(sampleBuffer)
     }

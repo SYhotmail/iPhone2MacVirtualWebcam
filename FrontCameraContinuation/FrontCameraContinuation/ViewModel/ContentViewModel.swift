@@ -65,6 +65,8 @@ final class ContentViewModel {
         }
     }
     
+    var showFullScreenPreview = false
+    
     private var cancellables = Set<AnyCancellable>()
     private(set)var isPreviewVisible = false
     private(set) var isStreamingRequested = false
