@@ -217,7 +217,7 @@ struct ContentView: View {
 
             Text(viewModel.statusTitle.uppercased())
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.primary)
+                .foregroundStyle(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(previewStatusColor, in: Capsule())
