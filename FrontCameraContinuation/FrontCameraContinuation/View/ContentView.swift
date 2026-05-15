@@ -4,7 +4,8 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var viewModel = ContentViewModel()
     @FocusState private var focusedField: Field?
-
+    @Namespace private var namespace
+    
     private enum Field {
         case host
         case port
@@ -22,8 +23,9 @@ struct ContentView: View {
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
                     headerSection
-                    if viewModel.isPreviewVisible { // TODO: match geometry transition
+                    if viewModel.isPreviewVisible {
                         previewSection
+                            .matchedTransitionSource(id: "preview", in: namespace)
                             .transition(.slide.combined(with: .opacity))
                     }
                     controlsSection
@@ -33,10 +35,38 @@ struct ContentView: View {
                 .padding(.bottom, 28)
             }
         }
-        .animation(.spring(response: 0.38, dampingFraction: 0.88), value: viewModel.isPreviewVisible)
+        .animation(.spring(response: 0.38, dampingFraction: 0.88),
+                   value: viewModel.isPreviewVisible)
+        .fullScreenCover(isPresented: $viewModel.showFullScreenPreview,
+                        content: {
+            CameraPreviewView(frameProvider: viewModel.cameraStreamer)
+            // TODO: add buttons..
+                .overlay(alignment: .topTrailing) {
+                    Button {
+                        toogleFullScreenPreview()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .resizable()
+                            .scaledToFill()
+                            .font(.subheadline.weight(.bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 38, height: 38)
+                            .background(.black.opacity(0.34), in: Circle())
+                            .padding(16)
+                    }.accessibilityLabel("Close")
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea(edges: .horizontal.union(.bottom))
+                .navigationTransition(.zoom(sourceID: "preview",
+                                            in: namespace))
+        })
         .onTapGesture {
             focusedField = nil
         }
+    }
+    
+    private func toogleFullScreenPreview() {
+        viewModel.showFullScreenPreview.toggle()
     }
 
     private var backgroundGradient: LinearGradient {
@@ -141,6 +171,7 @@ struct ContentView: View {
             .overlay(alignment: .bottomLeading) {
                 previewSummary
                     .padding(16)
+                    .allowsHitTesting(false)
             }
             .overlay(alignment: .topTrailing) {
                 previewControls
@@ -160,21 +191,21 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text(viewModel.statusTitle)
                 .font(.headline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
             Text(viewModel.isStreamingText)
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.82))
+                .foregroundStyle(.primary.opacity(0.82))
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
-        .background(.black.opacity(0.34), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .background(.background.opacity(0.34), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
     }
 
     private var previewControls: some View {
         HStack(spacing: 10) {
             Button {
-                viewModel.togglePreviewVisibility()
+                toogleFullScreenPreview()
             } label: {
                 Image(systemName: "arrow.up.left.and.arrow.down.right")
                     .font(.subheadline.weight(.bold))
@@ -182,11 +213,11 @@ struct ContentView: View {
                     .frame(width: 38, height: 38)
                     .background(.black.opacity(0.34), in: Circle())
             }
-            .accessibilityLabel("Hide preview")
+            .accessibilityLabel("Full Screen Preview")
 
             Text(viewModel.statusTitle.uppercased())
                 .font(.caption.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 7)
                 .background(previewStatusColor, in: Capsule())
