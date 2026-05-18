@@ -12,15 +12,17 @@ import UIKit
 
 struct CameraPreview: PlatformNativeViewRepresentable {
     let frameProvider: any PreviewDecodedFrameProvidable
+    
     typealias UIViewType = VideoView
+    
     private func defineVideoView(_ nsView: PlatformViewType, context: Context) {
         let coordinator = context.coordinator
-        coordinator.bind(frameProvider: frameProvider, renderer: nsView.sampleBufferRenderer)
-        coordinator.defineView(nsView)
+        coordinator.bind(frameProvider: frameProvider, view: nsView)
     }
     
     func makePlatformView(context: Context) -> PlatformViewType {
         let view = VideoView(frame: .zero)
+        
         defineVideoView(view, context: context)
         return view
     }
@@ -30,7 +32,6 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     }
     
     static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
-        coordinator.cancellable = nil
         coordinator.undefineView(view)
     }
     
@@ -48,13 +49,13 @@ struct CameraPreview: PlatformNativeViewRepresentable {
             return tap
         }()
         
-        func defineView(_ uiView: VideoView) {
+        private func addTapGesture(_ uiView: UIView) {
             guard uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture } ) == nil else { return }
             uiView.isUserInteractionEnabled = true
             uiView.addGestureRecognizer(doubleTapGesture)
         }
         
-        func undefineView(_ uiView: VideoView) {
+        private func removeTapGesture(_ uiView: UIView) {
             guard let index = uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture } ) else {
                 return
             }
@@ -76,9 +77,23 @@ struct CameraPreview: PlatformNativeViewRepresentable {
             }
         }
         
-        func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
+        private func resetCancellable() {
+            cancellable = nil
+        }
+        
+        func undefineView(_ view: UIView) {
+            resetCancellable()
+            removeTapGesture(view)
+        }
+        
+        func bind(frameProvider: PreviewDecodedFrameProvidable, view: VideoView) {
+            bind(frameProvider: frameProvider, renderer: view.sampleBufferRenderer)
+            addTapGesture(view)
+        }
+        
+        private func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
             guard let renderer else {
-                cancellable = nil
+                resetCancellable()
                 return
             }
             cancellable = frameProvider.decodedFrameSubject().onMainAnyPublisher().sink { [weak renderer] buffer in
