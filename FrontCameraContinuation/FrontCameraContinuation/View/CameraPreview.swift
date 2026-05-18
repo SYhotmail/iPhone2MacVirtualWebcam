@@ -1,8 +1,3 @@
-import AVFoundation
-import Combine
-import SwiftUI
-import UIKit
-
 //
 //  VideoViewRepresentable.swift
 //  FrontCameraContinuation
@@ -10,7 +5,12 @@ import UIKit
 //  Created by Siarhei Yakushevich on 16/04/2026.
 //
 
-struct CameraPreviewView: PlatformNativeViewRepresentable {
+import AVFoundation
+import Combine
+import SwiftUI
+import UIKit
+
+struct CameraPreview: PlatformNativeViewRepresentable {
     let frameProvider: any PreviewDecodedFrameProvidable
     typealias UIViewType = VideoView
     private func defineVideoView(_ nsView: PlatformViewType, context: Context) {
@@ -75,7 +75,6 @@ struct CameraPreviewView: PlatformNativeViewRepresentable {
                 break
             }
         }
-        
         
         func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
             guard let renderer else {

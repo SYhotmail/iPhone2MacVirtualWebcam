@@ -11,7 +11,7 @@ import Combine
 import CoreMedia
 internal import AVFoundation
 
-struct VideoViewRepresentable: PlatformNativeViewRepresentable {
+struct VideoPreview: PlatformNativeViewRepresentable {
     typealias NSViewType = VideoView
     
     let frameProvider: any PreviewDecodedFrameProvidable
