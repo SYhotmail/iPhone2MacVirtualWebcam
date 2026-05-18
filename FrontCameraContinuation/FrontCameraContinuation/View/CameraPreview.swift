@@ -11,6 +11,7 @@ import SwiftUI
 import UIKit
 
 struct CameraPreview: PlatformNativeViewRepresentable {
+    let pipController: CameraPIPManager
     let frameProvider: any PreviewDecodedFrameProvidable
     
     typealias UIViewType = VideoView
@@ -18,6 +19,10 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     private func defineVideoView(_ nsView: PlatformViewType, context: Context) {
         let coordinator = context.coordinator
         coordinator.bind(frameProvider: frameProvider, view: nsView)
+        if let layer = nsView.displayLayer {
+            coordinator.pipController = pipController
+            pipController.createPIP(sampleBufferDisplayLayer: layer)
+        }
     }
     
     func makePlatformView(context: Context) -> PlatformViewType {
@@ -33,6 +38,10 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     
     static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
         coordinator.undefineView(view)
+        if let displayLayer = view.displayLayer {
+            coordinator.pipController?.stopPIP(sampleBufferDisplayLayer: displayLayer)
+            coordinator.pipController = nil
+        }
     }
     
     func makeCoordinator() -> Coordinator {
@@ -42,6 +51,7 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     final class Coordinator: NSObject {
         @Cancelling
         var cancellable: AnyCancellable?
+        var pipController: CameraPIPManager?
         
         lazy var doubleTapGesture: UITapGestureRecognizer! = {
             let tap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(sender: )))

@@ -66,6 +66,13 @@
 			);
 			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
 		};
+		2163E7682FBB6C670005AF44 /* Exceptions for "FrontCameraContinuation" folder in "FrontCameraContinuation" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -79,6 +86,9 @@
 		};
 		215482C22F91423800163538 /* FrontCameraContinuation */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				2163E7682FBB6C670005AF44 /* Exceptions for "FrontCameraContinuation" folder in "FrontCameraContinuation" target */,
+			);
 			path = FrontCameraContinuation;
 			sourceTree = "<group>";
 		};
@@ -523,6 +533,7 @@
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FrontCameraContinuation/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Privacy - Camera Usage Description";
@@ -561,6 +572,7 @@
 				DEVELOPMENT_TEAM = 44P2L32FL4;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = FrontCameraContinuation/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Privacy - Camera Usage Description";

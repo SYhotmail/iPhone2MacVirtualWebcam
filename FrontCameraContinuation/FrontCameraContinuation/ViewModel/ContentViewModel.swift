@@ -80,9 +80,12 @@ final class ContentViewModel {
         }
     }
     
-    init(cameraStreamer: CameraStreamer = .init(), defaults: UserDefaults = .standard) {
+    init(cameraStreamer: CameraStreamer = .init(),
+         pipController: CameraPIPManager = .init(),
+         defaults: UserDefaults = .standard) {
         self.cameraStreamer = cameraStreamer
         self.defaults = defaults
+        self.pipController = pipController
         host = defaults.string(forKey: Constants.hostKey) ?? Constants.defaultHost
         port = defaults.string(forKey: Constants.portKey) ?? Constants.defaultPortString
         streamSize = defaults.object(forKey: Constants.streamSize) != nil ? StreamSize(rawValue: defaults.integer(forKey: Constants.streamSize)) ?? .hd720 : .hd720
@@ -90,6 +93,7 @@ final class ContentViewModel {
         bind()
     }
 
+    let pipController: CameraPIPManager
     // Streaming backend
     let cameraStreamer: CameraStreamer
     let defaults: UserDefaults

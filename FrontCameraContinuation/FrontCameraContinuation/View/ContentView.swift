@@ -167,7 +167,7 @@ struct ContentView: View {
     }
     
     private var cameraPreview: some View {
-        CameraPreview(frameProvider: viewModel.cameraStreamer)
+        CameraPreview(pipController: viewModel.pipController,   frameProvider: viewModel.cameraStreamer)
     }
 
     private var previewSection: some View {
