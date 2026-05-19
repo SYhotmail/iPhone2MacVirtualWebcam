@@ -11,8 +11,10 @@ final class CameraPIPManager: NSObject {
     private var pipController: AVPictureInPictureController!
     let audioSession: AVAudioSession
     
+    private var audioCategoryInfo: AudioSessionCategoryInfo?
+    
     private var isPossible = false
-    private var audioCategoryDefined = false
+    
     private var isPossibleObservation: NSKeyValueObservation? {
         didSet {
             guard let oldValue, oldValue !== isPossibleObservation else {
@@ -48,7 +50,6 @@ final class CameraPIPManager: NSObject {
                                                                 playbackDelegate: self)
         let pipController = AVPictureInPictureController(contentSource: source)
         pipController.canStartPictureInPictureAutomaticallyFromInline = true
-        pipController.requiresLinearPlayback = true
         pipController.requiresLinearPlayback = false
         if pipController.value(forKey: "controlsStyle") != nil {
             pipController.setValue(1, forKey: "controlsStyle") // hide play controls..
@@ -89,16 +90,27 @@ final class CameraPIPManager: NSObject {
     }
     
     private func changeAudioSessionCategory(activate: Bool) throws {
-        guard audioCategoryDefined != activate else {
+        let isActive = audioCategoryInfo != nil
+        guard isActive != activate else {
             return
         }
         debugPrint("Was active \(audioSession.category.rawValue) mode \(audioSession.mode.rawValue)")
+        let mode = audioCategoryInfo?.mode ?? .moviePlayback
+        let category = audioCategoryInfo?.category ?? .playback
+        let options = audioCategoryInfo?.options ?? [.mixWithOthers]
+        
+        try audioSession.setCategory(category, mode: mode, options: options)
+        try audioSession.setActive(true)
+        
         if activate {
-            // TODO: 
-            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            if audioCategoryInfo == nil {
+                audioCategoryInfo = .init(category:audioSession.category,
+                                          mode: audioSession.mode,
+                                          options: audioSession.categoryOptions)
+            }
+        } else if !activate {
+            audioCategoryInfo = nil
         }
-        try audioSession.setActive(activate)
-        audioCategoryDefined = activate
     }
     
     func startPIP() {
@@ -130,8 +142,6 @@ final class CameraPIPManager: NSObject {
         }
         resetPIPController()
         assert(isPossibleObservation == nil)
-        // without calling set category
-        audioCategoryDefined = false
         try? changeAudioSessionCategory(activate: false)
     }
 }
@@ -159,4 +169,10 @@ extension CameraPIPManager: AVPictureInPictureSampleBufferPlaybackDelegate {
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
 
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime) async {}
+}
+
+private struct AudioSessionCategoryInfo {
+    var category: AVAudioSession.Category = .ambient
+    var mode: AVAudioSession.Mode = .default
+    var options: AVAudioSession.CategoryOptions = []
 }

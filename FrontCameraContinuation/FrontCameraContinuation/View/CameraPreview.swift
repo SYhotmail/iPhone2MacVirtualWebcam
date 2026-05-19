@@ -19,10 +19,6 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     private func defineVideoView(_ nsView: PlatformViewType, context: Context) {
         let coordinator = context.coordinator
         coordinator.bind(frameProvider: frameProvider, view: nsView)
-        if let layer = nsView.displayLayer {
-            coordinator.pipController = pipController
-            pipController.createPIP(sampleBufferDisplayLayer: layer)
-        }
     }
     
     func makePlatformView(context: Context) -> PlatformViewType {
@@ -34,6 +30,10 @@ struct CameraPreview: PlatformNativeViewRepresentable {
 
     func updatePlatformView(_ view: PlatformViewType, context: Context) {
         defineVideoView(view, context: context)
+        if let layer = view.displayLayer {
+            context.coordinator.pipController = pipController
+            pipController.createPIP(sampleBufferDisplayLayer: layer)
+        }
     }
     
     
