@@ -68,14 +68,12 @@ struct ContentView: View {
         .onTapGesture {
             focusedField = nil
         }
-        .onChange(of: scenePhase) { oldValue, newValue in
-            viewModel.sceneMoved(from: oldValue, to: newValue)
+        .onChange(of: scenePhase) { _, newValue in
+            guard newValue == .active else {
+                return
+            }
+            viewModel.pipController.stopPIP()
         }
-#if os(iOS)
-        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-            viewModel.applicationWillResignActive()
-        }
-#endif
     }
     
     private func toogleFullScreenPreview() {

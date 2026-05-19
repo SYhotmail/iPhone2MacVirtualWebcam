@@ -38,7 +38,6 @@ final class CameraPIPManager: NSObject {
     private let contentViewController = VideoCallPictureInPictureContentViewController()
     private let audioSession: AVAudioSession
     private var shouldStartWhenPossible = false
-    var isActive = true
     
     init(audioSession: AVAudioSession = .sharedInstance()) {
         self.audioSession = audioSession
@@ -100,10 +99,6 @@ final class CameraPIPManager: NSObject {
             return false
         }
         
-        guard canAttemptPictureInPictureStart else {
-            return false
-        }
-        
         if isPictureInPictureActive != true {
             pipController.startPictureInPicture()
         }
@@ -117,12 +112,6 @@ final class CameraPIPManager: NSObject {
     private func startPictureInPictureWhenPossible(remainingAttempts: Int) {
         guard shouldStartWhenPossible,
               isPictureInPictureActive == false else {
-            return
-        }
-
-        guard canAttemptPictureInPictureStart else {
-            shouldStartWhenPossible = false
-            pendingStartTask = nil
             return
         }
 
@@ -164,16 +153,13 @@ final class CameraPIPManager: NSObject {
         isPossibleObservation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in
                 guard let self,
-                      self.shouldStartWhenPossible,
-                      self.canAttemptPictureInPictureStart else {
+                      self.shouldStartWhenPossible else {
                     return
                 }
                 self.startPictureInPicture()
             }
         }
     }
-
-    private var canAttemptPictureInPictureStart: Bool { isActive }
 
     private func updateAudioSession(isActive: Bool) {
         do {
