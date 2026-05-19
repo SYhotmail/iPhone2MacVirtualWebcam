@@ -7,7 +7,6 @@
 import AVFoundation
 import AVKit
 import Combine
-import UIKit
 
 @MainActor
 final class CameraPIPManager: NSObject {
@@ -39,7 +38,8 @@ final class CameraPIPManager: NSObject {
     private let contentViewController = VideoCallPictureInPictureContentViewController()
     private let audioSession: AVAudioSession
     private var shouldStartWhenPossible = false
-
+    var isActive = true
+    
     init(audioSession: AVAudioSession = .sharedInstance()) {
         self.audioSession = audioSession
         super.init()
@@ -173,9 +173,7 @@ final class CameraPIPManager: NSObject {
         }
     }
 
-    private var canAttemptPictureInPictureStart: Bool {
-        UIApplication.shared.applicationState == .active
-    }
+    private var canAttemptPictureInPictureStart: Bool { isActive }
 
     private func updateAudioSession(isActive: Bool) {
         do {

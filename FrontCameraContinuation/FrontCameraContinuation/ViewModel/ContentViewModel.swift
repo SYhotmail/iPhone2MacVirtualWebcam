@@ -1,9 +1,7 @@
 import SwiftUI
 import AVFoundation
 import Combine
-#if os(iOS)
 import UIKit
-#endif
 
 @Observable
 final class ContentViewModel {
@@ -133,7 +131,9 @@ final class ContentViewModel {
         }
 
         scenePhase = newValue
-        if newValue == .active {
+        let isActive = newValue == .active
+        pipController.isActive = isActive
+        if isActive {
             syncPictureInPicture()
         }
     }
@@ -294,11 +294,9 @@ final class ContentViewModel {
     
 
     private static func changeIdleTimer(_ isIdleTimerDisabled: Bool) {
-#if os(iOS)
         Task { @MainActor in
             UIApplication.shared.isIdleTimerDisabled = isIdleTimerDisabled
         }
-#endif
     }
 
     private func applyConnectionStatus(_ status: CameraStreamer.ConnectionStatus) {
