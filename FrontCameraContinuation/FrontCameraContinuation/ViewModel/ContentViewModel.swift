@@ -69,6 +69,7 @@ final class ContentViewModel {
     
     private var cancellables = Set<AnyCancellable>()
     private(set)var isPreviewVisible = false
+    private var scenePhase: ScenePhase = .active
     
     @ObservationIgnored
     let previewAnimation = ContentViewModel.defaultPreviewAnimation
@@ -84,6 +85,7 @@ final class ContentViewModel {
                 return
             }
             Self.changeIdleTimer(isStreaming)
+            syncPictureInPicture()
         }
     }
     
@@ -120,24 +122,27 @@ final class ContentViewModel {
         cameraStreamer.preparePreview(position: cameraPosition.avPosition,
                                       preset: streamSize.sessionPreset)
     }
+
+    var shouldAttachPreviewLayer: Bool {
+        isPreviewVisible || isStreamingRequested
+    }
     
     func sceneMoved(from oldValue: ScenePhase, to newValue: ScenePhase) {
         guard oldValue != newValue else {
             return
         }
-        
-        guard isPreviewVisible else {
+
+        scenePhase = newValue
+        if newValue == .active {
+            syncPictureInPicture()
+        }
+    }
+
+    func applicationWillResignActive() {
+        guard isStreaming else {
             return
         }
-        
-        //let isBackground = newValue == .background
-        /*let wasActive = oldValue == .active
-        let isActive = newValue == .active
-        if wasActive {
-            pipController.startPIP()
-        } else if isActive {
-            pipController.stopPIP()
-        }*/
+        pipController.startPIP()
     }
     
     var isStreamingText: String {
@@ -312,5 +317,14 @@ final class ContentViewModel {
             isStreaming = false
             streamStatus = isStreamingRequested ? .waitingForReceiver : .attentionNeeded
         }
+    }
+
+    private func syncPictureInPicture() {
+        let isActive = scenePhase == .active
+        guard isStreaming, !isActive else {
+            pipController.stopPIP()
+            return
+        }
+        pipController.startPIP()
     }
 }

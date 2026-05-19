@@ -30,19 +30,15 @@ struct CameraPreview: PlatformNativeViewRepresentable {
 
     func updatePlatformView(_ view: PlatformViewType, context: Context) {
         defineVideoView(view, context: context)
-        if let layer = view.displayLayer {
-            context.coordinator.pipController = pipController
-            pipController.createPIP(sampleBufferDisplayLayer: layer)
-        }
+        context.coordinator.pipController = pipController
+        pipController.attach(sourceView: view, frameProvider: frameProvider)
     }
     
     
     static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
         coordinator.undefineView(view)
-        if let displayLayer = view.displayLayer {
-            coordinator.pipController?.stopPIP(sampleBufferDisplayLayer: displayLayer)
-            coordinator.pipController = nil
-        }
+        coordinator.pipController?.detach(sourceView: view)
+        coordinator.pipController = nil
     }
     
     func makeCoordinator() -> Coordinator {

@@ -4,17 +4,20 @@
 //
 //  Created by Siarhei Yakushevich on 18/05/2026.
 //
-import Foundation
+import AVFoundation
 import AVKit
+import Combine
+import UIKit
 
+@MainActor
 final class CameraPIPManager: NSObject {
-    private var pipController: AVPictureInPictureController!
-    let audioSession: AVAudioSession
-    
-    private var audioCategoryInfo: AudioSessionCategoryInfo?
-    
-    private var isPossible = false
-    
+    private enum Constants {
+        static let preferredContentSize = CGSize(width: 1080, height: 1920)
+        static let startRetries = 8
+        static let startRetryDelay: Duration = .milliseconds(150)
+    }
+
+    private var pipController: AVPictureInPictureController?
     private var isPossibleObservation: NSKeyValueObservation? {
         didSet {
             guard let oldValue, oldValue !== isPossibleObservation else {
@@ -23,156 +26,198 @@ final class CameraPIPManager: NSObject {
             oldValue.invalidate()
         }
     }
-    
-    private var shouldStartPIP = false
+    private var pendingStartTask: Task<Void, Never>? {
+        didSet {
+            guard let oldValue else {
+                return
+            }
+            oldValue.cancel()
+        }
+    }
+    private var frameSubscription: AnyCancellable?
+    private weak var sourceView: VideoView?
+    private let contentViewController = VideoCallPictureInPictureContentViewController()
+    private let audioSession: AVAudioSession
+    private var shouldStartWhenPossible = false
+
     init(audioSession: AVAudioSession = .sharedInstance()) {
         self.audioSession = audioSession
         super.init()
     }
-    
+
     static func isPictureInPictureSupported() -> Bool {
         AVPictureInPictureController.isPictureInPictureSupported()
     }
+
+    func attach(sourceView: VideoView?, frameProvider: any PreviewDecodedFrameProvidable) {
+        bind(frameProvider: frameProvider)
+
+        guard self.sourceView !== sourceView else {
+            return
+        }
+
+        self.sourceView = sourceView
+        configurePictureInPictureController(for: sourceView)
+    }
+
+    func detach(sourceView: VideoView) {
+        guard self.sourceView === sourceView else {
+            return
+        }
+
+        self.sourceView = nil
+        stopPIP()
+        configurePictureInPictureController(for: nil)
+    }
+
+    func startPIP() {
+        guard isPictureInPictureActive != true else {
+            return
+        }
+
+        shouldStartWhenPossible = true
+        updateAudioSession(isActive: true)
+        startPictureInPictureWhenPossible(remainingAttempts: Constants.startRetries)
+    }
+
+    func stopPIP() {
+        shouldStartWhenPossible = false
+        updateAudioSession(isActive: false)
+        pipController?.stopPictureInPicture()
+    }
+
+    private func bind(frameProvider: any PreviewDecodedFrameProvidable) {
+        frameSubscription = frameProvider.decodedFrameSubject()
+            .onMainAnyPublisher()
+            .sink { [weak self] sampleBuffer in
+                self?.contentViewController.enqueue(sampleBuffer: sampleBuffer)
+            }
+    }
     
     @discardableResult
-    func createPIP(sampleBufferDisplayLayer: AVSampleBufferDisplayLayer) -> Bool {
-        guard Self.isPictureInPictureSupported() else {
-            resetPIPController()
+    private func startPictureInPicture() -> Bool {
+        guard let pipController, pipController.isPictureInPicturePossible else {
             return false
         }
         
-        guard self.pipController?.contentSource?.sampleBufferDisplayLayer !== sampleBufferDisplayLayer else {
-            assert(isPossibleObservation != nil)
-            return true
+        guard canAttemptPictureInPictureStart else {
+            return false
         }
         
-        let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: sampleBufferDisplayLayer,
-                                                                playbackDelegate: self)
-        let pipController = AVPictureInPictureController(contentSource: source)
-        pipController.canStartPictureInPictureAutomaticallyFromInline = true
-        pipController.requiresLinearPlayback = false
-        if pipController.value(forKey: "controlsStyle") != nil {
-            pipController.setValue(1, forKey: "controlsStyle") // hide play controls..
+        if isPictureInPictureActive != true {
+            pipController.startPictureInPicture()
         }
-        pipController.delegate = self
-        self.pipController = pipController
-        observePIPPossibleState()
-        
-        try? changeAudioSessionCategory(activate: true)
-        
         return true
     }
     
-    private func observePIPPossibleState() {
-        isPossibleObservation = pipController?.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { controller, change in
-            let isPossible = change.newValue ?? controller.isPictureInPicturePossible
+    private var isPictureInPictureActive: Bool? {
+        pipController?.isPictureInPictureActive
+    }
+
+    private func startPictureInPictureWhenPossible(remainingAttempts: Int) {
+        guard shouldStartWhenPossible,
+              isPictureInPictureActive == false else {
+            return
+        }
+
+        guard canAttemptPictureInPictureStart else {
+            shouldStartWhenPossible = false
+            pendingStartTask = nil
+            return
+        }
+
+        startPictureInPicture()
+
+        guard remainingAttempts > 0 else {
+            return
+        }
+
+        pendingStartTask = Task { [weak self] in
+            try? await Task.sleep(for: Constants.startRetryDelay)
+            guard let self else {
+                return
+            }
+            self.startPictureInPictureWhenPossible(remainingAttempts: remainingAttempts - 1)
+        }
+    }
+
+    private func configurePictureInPictureController(for sourceView: VideoView?) {
+        isPossibleObservation = nil
+        pendingStartTask = nil
+
+        guard Self.isPictureInPictureSupported(),
+              let sourceView else {
+            pipController = nil
+            return
+        }
+
+        contentViewController.preferredContentSize = Constants.preferredContentSize
+        let contentSource = AVPictureInPictureController.ContentSource(
+            activeVideoCallSourceView: sourceView,
+            contentViewController: contentViewController
+        )
+        let controller = AVPictureInPictureController(contentSource: contentSource)
+        controller.delegate = self
+        controller.canStartPictureInPictureAutomaticallyFromInline = true
+        pipController = controller
+
+        isPossibleObservation = controller.observe(\.isPictureInPicturePossible, options: [.initial, .new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in
-                guard let self, self.isPossibleObservation != nil else {
+                guard let self,
+                      self.shouldStartWhenPossible,
+                      self.canAttemptPictureInPictureStart else {
                     return
                 }
-                self.isPossible = isPossible
-                if self.shouldStartPIP, isPossible {
-                    startPIPCore(isPossible: true)
-                }
+                self.startPictureInPicture()
             }
         }
     }
-    
-    private func startPIPCore(isPossible: Bool) {
-        let isPictureInPictureNotActive = !pipController.isPictureInPictureActive
-        guard isPossible else {
-            self.shouldStartPIP = isPictureInPictureNotActive
-            return
-        }
-        if isPictureInPictureNotActive {
-            pipController.startPictureInPicture()
-        }
+
+    private var canAttemptPictureInPictureStart: Bool {
+        UIApplication.shared.applicationState == .active
     }
-    
-    private func changeAudioSessionCategory(activate: Bool) throws {
-        let isActive = audioCategoryInfo != nil
-        guard isActive != activate else {
-            return
-        }
-        debugPrint("Was active \(audioSession.category.rawValue) mode \(audioSession.mode.rawValue)")
-        let mode = audioCategoryInfo?.mode ?? .moviePlayback
-        let category = audioCategoryInfo?.category ?? .playback
-        let options = audioCategoryInfo?.options ?? [.mixWithOthers]
-        
-        try audioSession.setCategory(category, mode: mode, options: options)
-        try audioSession.setActive(true)
-        
-        if activate {
-            if audioCategoryInfo == nil {
-                audioCategoryInfo = .init(category:audioSession.category,
-                                          mode: audioSession.mode,
-                                          options: audioSession.categoryOptions)
+
+    private func updateAudioSession(isActive: Bool) {
+        do {
+            if isActive {
+                try audioSession.setCategory(
+                    .playAndRecord,
+                    mode: .videoChat,
+                    options: [.mixWithOthers, .defaultToSpeaker]
+                )
             }
-        } else if !activate {
-            audioCategoryInfo = nil
+            try audioSession.setActive(isActive)
+        } catch {
+            debugPrint("Failed to configure audio session for PiP: \(error)")
         }
-    }
-    
-    func startPIP() {
-        guard let pipController else {
-            return
-        }
-        startPIPCore(isPossible: pipController.isPictureInPicturePossible)
-    }
-    
-    func stopPIP(sampleBufferDisplayLayer: AVSampleBufferDisplayLayer) {
-        guard self.pipController?.contentSource?.sampleBufferDisplayLayer == sampleBufferDisplayLayer else {
-            return
-        }
-        stopPIP()
-    }
-    
-    private func resetPIPController() {
-        pipController = nil
-        observePIPPossibleState()
-    }
-    
-    func stopPIP() {
-        guard let pipController else {
-            return
-        }
-        shouldStartPIP = false
-        if pipController.isPictureInPictureActive {
-            pipController.stopPictureInPicture()
-        }
-        resetPIPController()
-        assert(isPossibleObservation == nil)
-        try? changeAudioSessionCategory(activate: false)
     }
 }
 
-// MARK: - AVPictureInPictureControllerDelegate
+@MainActor
 extension CameraPIPManager: AVPictureInPictureControllerDelegate {
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: any Error) {
-        debugPrint("!!! Error \(error)")
+    func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        pendingStartTask = nil
+    }
+
+    func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+        shouldStartWhenPossible = false
+    }
+
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController,
+                                    failedToStartPictureInPictureWithError error: Error) {
+        shouldStartWhenPossible = false
+        debugPrint("PiP failed to start: \(error)")
     }
 }
 
-// MARK: - AVPictureInPictureSampleBufferPlaybackDelegate
-extension CameraPIPManager: AVPictureInPictureSampleBufferPlaybackDelegate {
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {}
+private final class VideoCallPictureInPictureContentViewController: AVPictureInPictureVideoCallViewController {
+    let videoView = VideoView(frame: .zero)
 
-    func pictureInPictureControllerTimeRangeForPlayback(_ pictureInPictureController: AVPictureInPictureController) -> CMTimeRange {
-        // For live content, return a time range with a duration of positiveInfinity.
-        CMTimeRange(start: .zero, duration: .positiveInfinity)
+    override func loadView() {
+        view = videoView
     }
-
-    func pictureInPictureControllerIsPlaybackPaused(_ pictureInPictureController: AVPictureInPictureController) -> Bool {
-        false
+    
+    func enqueue(sampleBuffer: CMSampleBuffer) {
+        videoView.sampleBufferRenderer?.enqueue(sampleBuffer)
     }
-
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, didTransitionToRenderSize newRenderSize: CMVideoDimensions) {}
-
-    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, skipByInterval skipInterval: CMTime) async {}
-}
-
-private struct AudioSessionCategoryInfo {
-    var category: AVAudioSession.Category = .ambient
-    var mode: AVAudioSession.Mode = .default
-    var options: AVAudioSession.CategoryOptions = []
 }

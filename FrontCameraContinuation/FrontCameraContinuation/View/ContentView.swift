@@ -29,6 +29,8 @@ struct ContentView: View {
                         previewSection
                             .matchedTransitionSource(id: previewId, in: namespace)
                             .transition(.slide.combined(with: .opacity))
+                    } else if viewModel.shouldAttachPreviewLayer {
+                        hiddenPreviewSource
                     }
                     controlsSection
                 }
@@ -69,6 +71,11 @@ struct ContentView: View {
         .onChange(of: scenePhase) { oldValue, newValue in
             viewModel.sceneMoved(from: oldValue, to: newValue)
         }
+#if os(iOS)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            viewModel.applicationWillResignActive()
+        }
+#endif
     }
     
     private func toogleFullScreenPreview() {
@@ -196,6 +203,15 @@ struct ContentView: View {
             }
         .frame(maxWidth: .infinity)
         .frame(height: 360)
+    }
+
+    private var hiddenPreviewSource: some View {
+        cameraPreview
+            .id(viewModel.cameraPreviewId)
+            .frame(width: 1, height: 1)
+            .opacity(0.001)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private var previewSummary: some View {
