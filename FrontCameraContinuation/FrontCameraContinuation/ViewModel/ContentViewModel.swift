@@ -102,9 +102,35 @@ final class ContentViewModel {
         cameraStreamer.session
     }
     
+    private(set)var cameraPreviewId = UInt128(0)
+    
+    func handleFullScreenPreviewDismiss() {
+        assert(isPreviewVisible)
+        cameraPreviewId += 1
+    }
+    
     private func preparePreview() {
         cameraStreamer.preparePreview(position: cameraPosition.avPosition,
                                       preset: streamSize.sessionPreset)
+    }
+    
+    func sceneMoved(from oldValue: ScenePhase, to newValue: ScenePhase) {
+        guard oldValue != newValue else {
+            return
+        }
+        
+        guard isPreviewVisible else {
+            return
+        }
+        
+        //let isBackground = newValue == .background
+        /*let wasActive = oldValue == .active
+        let isActive = newValue == .active
+        if wasActive {
+            pipController.startPIP()
+        } else if isActive {
+            pipController.stopPIP()
+        }*/
     }
     
     var isStreamingText: String {

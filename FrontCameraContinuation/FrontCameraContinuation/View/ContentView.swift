@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = ContentViewModel()
     @FocusState private var focusedField: Field?
     @Namespace private var namespace
@@ -38,6 +39,8 @@ struct ContentView: View {
         .animation(.spring(response: 0.38, dampingFraction: 0.88),
                    value: viewModel.isPreviewVisible)
         .fullScreenCover(isPresented: $viewModel.showFullScreenPreview,
+                         onDismiss:
+            viewModel.handleFullScreenPreviewDismiss,
                         content: {
             cameraPreview
             // TODO: add buttons..
@@ -62,6 +65,9 @@ struct ContentView: View {
         })
         .onTapGesture {
             focusedField = nil
+        }
+        .onChange(of: scenePhase) { oldValue, newValue in
+            viewModel.sceneMoved(from: oldValue, to: newValue)
         }
     }
     
@@ -172,6 +178,7 @@ struct ContentView: View {
 
     private var previewSection: some View {
         cameraPreview
+            .id(viewModel.cameraPreviewId)
             .overlay(alignment: .bottomLeading) {
                 previewSummary
                     .padding(16)

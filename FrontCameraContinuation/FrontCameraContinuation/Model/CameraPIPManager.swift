@@ -23,7 +23,6 @@ final class CameraPIPManager: NSObject {
     }
     
     private var shouldStartPIP = false
-    
     init(audioSession: AVAudioSession = .sharedInstance()) {
         self.audioSession = audioSession
         super.init()
@@ -36,7 +35,7 @@ final class CameraPIPManager: NSObject {
     @discardableResult
     func createPIP(sampleBufferDisplayLayer: AVSampleBufferDisplayLayer) -> Bool {
         guard Self.isPictureInPictureSupported() else {
-            pipController = nil
+            resetPIPController()
             return false
         }
         
@@ -50,16 +49,16 @@ final class CameraPIPManager: NSObject {
         let pipController = AVPictureInPictureController(contentSource: source)
         pipController.canStartPictureInPictureAutomaticallyFromInline = true
         pipController.requiresLinearPlayback = true
-        pipController.setValue(1, forKey: "controlsStyle")
+        pipController.requiresLinearPlayback = false
+        if pipController.value(forKey: "controlsStyle") != nil {
+            pipController.setValue(1, forKey: "controlsStyle") // hide play controls..
+        }
+        pipController.delegate = self
         self.pipController = pipController
         observePIPPossibleState()
         
-        do {
-            try changeAudioSessionCategory(activate: true)
-        } catch {
-            debugPrint(error)
-            return false
-        }
+        try? changeAudioSessionCategory(activate: true)
+        
         return true
     }
     
@@ -79,25 +78,30 @@ final class CameraPIPManager: NSObject {
     }
     
     private func startPIPCore(isPossible: Bool) {
+        let isPictureInPictureNotActive = !pipController.isPictureInPictureActive
         guard isPossible else {
-            shouldStartPIP = !pipController.isPictureInPictureActive
+            self.shouldStartPIP = isPictureInPictureNotActive
             return
         }
-        pipController.startPictureInPicture()
+        if isPictureInPictureNotActive {
+            pipController.startPictureInPicture()
+        }
     }
     
     private func changeAudioSessionCategory(activate: Bool) throws {
-        if activate {
-            try audioSession.setCategory(.playAndRecord, mode: .videoChat)
-        }
         guard audioCategoryDefined != activate else {
             return
+        }
+        debugPrint("Was active \(audioSession.category.rawValue) mode \(audioSession.mode.rawValue)")
+        if activate {
+            // TODO: 
+            try audioSession.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
         }
         try audioSession.setActive(activate)
         audioCategoryDefined = activate
     }
     
-    func startPIP(sampleBufferDisplayLayer: AVSampleBufferDisplayLayer) {
+    func startPIP() {
         guard let pipController else {
             return
         }
@@ -111,20 +115,35 @@ final class CameraPIPManager: NSObject {
         stopPIP()
     }
     
+    private func resetPIPController() {
+        pipController = nil
+        observePIPPossibleState()
+    }
+    
     func stopPIP() {
         guard let pipController else {
             return
         }
         shouldStartPIP = false
-        pipController.stopPictureInPicture()
-        self.pipController = nil
-        observePIPPossibleState()
+        if pipController.isPictureInPictureActive {
+            pipController.stopPictureInPicture()
+        }
+        resetPIPController()
         assert(isPossibleObservation == nil)
+        // without calling set category
+        audioCategoryDefined = false
         try? changeAudioSessionCategory(activate: false)
     }
 }
 
 // MARK: - AVPictureInPictureControllerDelegate
+extension CameraPIPManager: AVPictureInPictureControllerDelegate {
+    func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, failedToStartPictureInPictureWithError error: any Error) {
+        debugPrint("!!! Error \(error)")
+    }
+}
+
+// MARK: - AVPictureInPictureSampleBufferPlaybackDelegate
 extension CameraPIPManager: AVPictureInPictureSampleBufferPlaybackDelegate {
     func pictureInPictureController(_ pictureInPictureController: AVPictureInPictureController, setPlaying playing: Bool) {}
 

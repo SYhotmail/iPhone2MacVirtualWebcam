@@ -36,6 +36,7 @@ struct CameraPreview: PlatformNativeViewRepresentable {
         defineVideoView(view, context: context)
     }
     
+    
     static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
         coordinator.undefineView(view)
         if let displayLayer = view.displayLayer {
@@ -51,6 +52,7 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     final class Coordinator: NSObject {
         @Cancelling
         var cancellable: AnyCancellable?
+        
         var pipController: CameraPIPManager?
         
         lazy var doubleTapGesture: UITapGestureRecognizer! = {

@@ -39,9 +39,11 @@ extension PlatformNativeViewRepresentable {
         updatePlatformView(uiView, context: context)
     }
     
-    static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
-        dismantleUIView(view, coordinator: coordinator)
+    static func dismantleUIView(_ uiView: PlatformViewType, coordinator: Coordinator) {
+        dismantleView(uiView, coordinator: coordinator)
     }
+    
+    static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {}
 }
 #elseif os(macOS)
 extension PlatformNativeViewRepresentable {
@@ -53,8 +55,10 @@ extension PlatformNativeViewRepresentable {
         updatePlatformView(nsView, context: context)
     }
     
-    static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
-        dismantleNSView(view, coordinator: coordinator)
+    static func dismantleNSView(_ view: PlatformViewType, coordinator: Coordinator) {
+        dismantleView(view, coordinator: coordinator)
     }
+    
+    static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {}
 }
 #endif
