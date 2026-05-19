@@ -69,8 +69,16 @@ final class ContentViewModel {
     
     private var cancellables = Set<AnyCancellable>()
     private(set)var isPreviewVisible = false
+    
+    @ObservationIgnored
+    private(set)var previewAnimation: Animation? = ContentViewModel.defaultPreviewAnimation
+    
+    static let defaultPreviewAnimation = Animation.spring(response: 0.38, dampingFraction: 0.88)
+    
     private(set) var isStreamingRequested = false
     private(set) var streamStatus: StreamStatus = .idle
+    private(set) var displayedPreviewByForce = false
+    
     private(set)var isStreaming = false {
         didSet {
             guard oldValue != isStreaming else {
@@ -265,6 +273,61 @@ final class ContentViewModel {
                 self?.isStreamingRequested = isRequested
             }
             .store(in: &cancellables)
+        
+        let center = NotificationCenter.default
+        
+        center.publisher(for: UIApplication.willResignActiveNotification).sink { [weak self] notification in
+            debugPrint("!!! \(notification)")
+            guard let self, self.isStreaming, !self.isPreviewVisible else {
+                return
+            }
+            self.isPreviewVisible = true // Show
+            self.previewAnimation = nil
+            self.displayedPreviewByForce = true
+        }.store(in: &cancellables)
+        
+        center.publisher(for: UIApplication.didBecomeActiveNotification).sink { [weak self] notification in
+            debugPrint("!!! \(notification)")
+            guard let self, self.isStreaming, self.displayedPreviewByForce else {
+                return
+            }
+            assert(self.isPreviewVisible)
+            self.isPreviewVisible = false // hide
+            self.displayedPreviewByForce = false
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.displayedPreviewByForce else {
+                    return
+                }
+                self.previewAnimation = Self.defaultPreviewAnimation // restore...
+            }
+        }.store(in: &cancellables)
+        
+        
+        center.publisher(for: UIApplication.willEnterForegroundNotification).sink { [weak self] notification in
+            debugPrint("!!! \(notification)")
+            guard let self, self.isStreaming, self.displayedPreviewByForce else {
+                return
+            }
+            assert(self.isPreviewVisible)
+            self.isPreviewVisible = false // hide
+            self.displayedPreviewByForce = false
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.displayedPreviewByForce else {
+                    return
+                }
+                self.previewAnimation = Self.defaultPreviewAnimation // restore...
+            }
+        }.store(in: &cancellables)
+        
+        center.publisher(for: UIApplication.didEnterBackgroundNotification).sink { [weak self] notification in
+            debugPrint("!!! \(notification)")
+            guard let self, self.isStreaming, !self.isPreviewVisible else {
+                return
+            }
+            self.isPreviewVisible = true // Show
+            self.previewAnimation = nil
+            self.displayedPreviewByForce = true
+        }.store(in: &cancellables)
     }
 
     func supportedCameraStreamSizes() -> [StreamSize] {

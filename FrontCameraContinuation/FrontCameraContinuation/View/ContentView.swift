@@ -36,7 +36,7 @@ struct ContentView: View {
                 .padding(.bottom, 28 - 20)
             }
         }
-        .animation(.spring(response: 0.38, dampingFraction: 0.88),
+        .animation(viewModel.previewAnimation,
                    value: viewModel.isPreviewVisible)
         .fullScreenCover(isPresented: $viewModel.showFullScreenPreview,
                          onDismiss:
