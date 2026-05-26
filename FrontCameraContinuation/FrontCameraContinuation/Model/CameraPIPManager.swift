@@ -86,10 +86,15 @@ final class CameraPIPManager: NSObject {
     }
 
     private func bind(frameProvider: any PreviewDecodedFrameProvidable) {
+        guard let sampleBufferRenderer = contentViewController.sampleBufferRenderer else {
+            frameSubscription = nil
+            return
+        }
+        
         frameSubscription = frameProvider.decodedFrameSubject()
             .onMainAnyPublisher()
-            .sink { [weak self] sampleBuffer in
-                self?.contentViewController.enqueue(sampleBuffer: sampleBuffer)
+            .sink { [weak sampleBufferRenderer] sampleBuffer in
+                sampleBufferRenderer?.enqueue(sampleBuffer)
             }
     }
     
@@ -201,7 +206,11 @@ private final class VideoCallPictureInPictureContentViewController: AVPictureInP
         view = videoView
     }
     
+    var sampleBufferRenderer: AVSampleBufferVideoRenderer? {
+        videoView.sampleBufferRenderer
+    }
+    
     func enqueue(sampleBuffer: CMSampleBuffer) {
-        videoView.sampleBufferRenderer?.enqueue(sampleBuffer)
+        sampleBufferRenderer?.enqueue(sampleBuffer)
     }
 }

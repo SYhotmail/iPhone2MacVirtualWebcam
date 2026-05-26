@@ -125,6 +125,42 @@ final class ConnectViewModel {
         return "Idle"
     }
 
+    var menuBarLabelText: String {
+        if connectionReady {
+            return "Live"
+        }
+
+        if isRunning {
+            return "Waiting"
+        }
+
+        return "Idle"
+    }
+
+    var menuBarSystemImage: String {
+        if connectionReady {
+            return "video.fill"
+        }
+
+        if isRunning {
+            return "dot.radiowaves.left.and.right"
+        }
+
+        return "video.slash"
+    }
+
+    var menuBarStatusText: String {
+        if connectionReady {
+            return "Streaming is active"
+        }
+
+        if listenerReady {
+            return "Receiver is waiting for iPhone"
+        }
+
+        return "Receiver is stopped"
+    }
+
     var overallStatusTitle: String {
         if connectionReady {
             return "Live Session"
@@ -175,13 +211,17 @@ final class ConnectViewModel {
 
     func refreshNetworkAddresses() {
         networkAddressTask = .init {
-            let value = await ipProvider.getIPv4Addresses()
-            await MainActor.run { [weak self] in
-                guard let self, !Task.isCancelled else {
-                    return
-                }
-                self.networkAddresses = value
+            await refreshNetworkAddresses()
+        }
+    }
+    
+    func refreshNetworkAddresses() async {
+        let value = await ipProvider.getIPv4Addresses()
+        await MainActor.run { [weak self] in
+            guard let self, !Task.isCancelled else {
+                return
             }
+            self.networkAddresses = value
         }
     }
 
@@ -198,15 +238,28 @@ final class ConnectViewModel {
     }
 
     func toggleServer() {
-        if isRunning {
-            manager.stop()
-            isRunning = false
-            connectionStatus = "Waiting for Listener"
-        } else {
-            manager.start(port: listenPort)
-            isRunning = true
-            refreshNetworkAddresses()
+        isRunning ? stopServer() : startServer()
+    }
+
+    func startServer() {
+        refreshNetworkAddresses()
+        
+        guard !isRunning else {
+            return
         }
+
+        manager.start(port: listenPort)
+        isRunning = true
+    }
+
+    func stopServer() {
+        guard isRunning else {
+            return
+        }
+
+        manager.stop()
+        isRunning = false
+        connectionStatus = "Waiting for Listener"
     }
     
     func scheduleDetectProperties() {

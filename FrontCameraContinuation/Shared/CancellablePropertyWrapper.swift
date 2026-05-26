@@ -6,6 +6,7 @@
 //
 
 import Combine
+import Dispatch
 
 /// A property wrapper that stores an optional `Cancellable` and
 /// automatically cancels the previously stored subscription when a new
@@ -19,7 +20,7 @@ import Combine
 /// $token.cancel()
 /// ```
 @propertyWrapper
-public final class Cancelling<Value: Cancellable> {
+public final class Cancelling<Value> {
     private var storage: Value?
 
     public init(wrappedValue: Value? = nil) {
@@ -37,7 +38,15 @@ public final class Cancelling<Value: Cancellable> {
     }
     
     private func cancelCore() {
-        storage?.cancel()
+        if let storage = storage as? Cancellable {
+            storage.cancel()
+        } else if let storage = storage as? DispatchWorkItem {
+            storage.cancel()
+        } else if let storage = storage as? Task<Void, Never> {
+            storage.cancel()
+        } else if let storage = storage as? Task<Void, Error> {
+            storage.cancel()
+        }
     }
 
     /// Access to the live wrapper to allow manual cancellation when needed.
@@ -52,9 +61,7 @@ public final class Cancelling<Value: Cancellable> {
     private static func isSameInstance(_ lhs: Value?, _ rhs: Value?) -> Bool {
         if let lhs = lhs as? AnyCancellable, let rhs = rhs as? AnyCancellable {
             return lhs == rhs
-        }
-        
-        if let lhs = lhs as AnyObject?, let rhs = rhs as AnyObject? {
+        } else if let lhs = lhs as? AnyObject, let rhs = rhs as? AnyObject {
             return lhs === rhs
         }
 

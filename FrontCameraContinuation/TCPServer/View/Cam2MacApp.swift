@@ -9,10 +9,16 @@ import SwiftUI
 
 @main
 struct Cam2MacApp: App {
-    static let quickSetupId = "quick-setup"
+    @Environment(\.openWindow) private var openWindow
     @State private var rootVM = ConnectViewModel()
+    
+    enum Constants {
+        static let mainWindowId = "main-window"
+        static let quickSetupId = "quick-setup"
+    }
+
     var body: some Scene {
-        WindowGroup {
+        WindowGroup("Cam2Mac", id: Constants.mainWindowId) {
             ConnectView(viewModel: rootVM)
         }
         .windowManagerRole(.principal)
@@ -21,7 +27,16 @@ struct Cam2MacApp: App {
             QuickSetupCommands()
         }
 
-        WindowGroup("Quick Setup", id: Self.quickSetupId) {
+        MenuBarExtra {
+            ReceiverMenuBarView(
+                viewModel: rootVM) {
+                    openWindow(id: Constants.mainWindowId)
+                }
+        } label: {
+            ReceiverMenuBarLabelView(viewModel: rootVM)
+        }
+
+        WindowGroup("Quick Setup", id: Constants.quickSetupId) {
             QuickSetupView(viewModel: rootVM.provideQuickSetupViewModel())
                 .frame(minWidth: 400, maxWidth: 900, minHeight: 400)
         }

@@ -242,7 +242,7 @@ final class CaptureSessionManager {
         guard let videoConnection = videoOutputConnection, let rotationCoordinator else { return }
         let angle = rotationCoordinator.videoRotationAngleForHorizonLevelCapture
         guard videoConnection.isVideoRotationAngleSupported(angle), videoConnection.videoRotationAngle != angle else { return }
-        debugPrint("!!! Apply rotation to video: \(angle)")
+        logger?.debug("!!! Apply rotation to video: \(angle)")
         videoConnection.videoRotationAngle = angle
     }
 }
