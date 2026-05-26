@@ -8,9 +8,33 @@
 import Combine
 import Dispatch
 
-/// A property wrapper that stores an optional `Cancellable` and
-/// automatically cancels the previously stored subscription when a new
-/// value is assigned.
+/// Types that should be cancelled when replaced in `Cancelling`.
+public protocol CancelOnReplacement {
+    func cancelOnReplacement()
+}
+
+extension CancelOnReplacement where Self: Cancellable {
+    public func cancelOnReplacement() {
+        cancel()
+    }
+}
+
+extension AnyCancellable: CancelOnReplacement {}
+
+extension DispatchWorkItem: CancelOnReplacement {
+    public func cancelOnReplacement() {
+        cancel()
+    }
+}
+
+extension Task: CancelOnReplacement {
+    public func cancelOnReplacement() {
+        cancel()
+    }
+}
+
+/// A property wrapper that stores an optional cancellation-aware value and
+/// automatically cancels the previously stored value when a new one is assigned.
 ///
 /// Usage:
 /// ```swift
@@ -20,7 +44,7 @@ import Dispatch
 /// $token.cancel()
 /// ```
 @propertyWrapper
-public final class Cancelling<Value> {
+public final class Cancelling<Value: CancelOnReplacement> {
     private var storage: Value?
 
     public init(wrappedValue: Value? = nil) {
@@ -38,15 +62,7 @@ public final class Cancelling<Value> {
     }
     
     private func cancelCore() {
-        if let storage = storage as? Cancellable {
-            storage.cancel()
-        } else if let storage = storage as? DispatchWorkItem {
-            storage.cancel()
-        } else if let storage = storage as? Task<Void, Never> {
-            storage.cancel()
-        } else if let storage = storage as? Task<Void, Error> {
-            storage.cancel()
-        }
+        storage?.cancelOnReplacement()
     }
 
     /// Access to the live wrapper to allow manual cancellation when needed.
