@@ -58,11 +58,6 @@
 		21583F262FA3EDEC00FCF073 /* Exceptions for "Shared" folder in "FrontCameraContinuation" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
-				CancellablePropertyWrapper.swift,
-				PreviewDecodedFrameProvidable.swift,
-				"Publisher+Ext.swift",
-				ViewRepresentable.swift,
-				VirtualCameraConfiguration.swift,
 			);
 			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
 		};
@@ -193,6 +188,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				215482C22F91423800163538 /* FrontCameraContinuation */,
+				A10000022F9143AA00163538 /* Shared */,
 			);
 			name = FrontCameraContinuation;
 			packageProductDependencies = (

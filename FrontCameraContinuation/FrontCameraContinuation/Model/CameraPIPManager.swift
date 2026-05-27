@@ -4,11 +4,9 @@
 //
 //  Created by Siarhei Yakushevich on 18/05/2026.
 //
-import AVFoundation
+@preconcurrency import AVFoundation
 import AVKit
-import Combine
 
-@MainActor
 final class CameraPIPManager: NSObject {
     private enum Constants {
         static let preferredContentSize = CGSize(width: 1080, height: 1920)
@@ -33,9 +31,11 @@ final class CameraPIPManager: NSObject {
             oldValue.cancel()
         }
     }
-    private var frameSubscription: AnyCancellable?
     private weak var sourceView: VideoView?
     private let contentViewController = VideoCallPictureInPictureContentViewController()
+    private let previewRendererBridge = SampleBufferRendererBridge(
+        queueLabel: "by.sy.FrontCameraContinuation.CameraPIP.render"
+    )
     private let audioSession: AVAudioSession
     private var shouldStartWhenPossible = false
     
@@ -65,8 +65,13 @@ final class CameraPIPManager: NSObject {
         }
 
         self.sourceView = nil
+        unbind()
         stopPIP()
         configurePictureInPictureController(for: nil)
+    }
+    
+    private func unbind() {
+        previewRendererBridge.unbind()
     }
 
     func startPIP() {
@@ -87,15 +92,12 @@ final class CameraPIPManager: NSObject {
 
     private func bind(frameProvider: any PreviewDecodedFrameProvidable) {
         guard let sampleBufferRenderer = contentViewController.sampleBufferRenderer else {
-            frameSubscription = nil
+            unbind()
             return
         }
-        
-        frameSubscription = frameProvider.decodedFrameSubject()
-            .onMainAnyPublisher()
-            .sink { [weak sampleBufferRenderer] sampleBuffer in
-                sampleBufferRenderer?.enqueue(sampleBuffer)
-            }
+
+        previewRendererBridge.bind(frameProvider: frameProvider,
+                                   renderer: sampleBufferRenderer)
     }
     
     @discardableResult

@@ -1,4 +1,4 @@
-internal import AVFoundation
+import AVFoundation
 import CoreMedia
 import CoreMediaIO
 import OSLog
@@ -306,4 +306,3 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
         return streamIDs
     }
 }
-

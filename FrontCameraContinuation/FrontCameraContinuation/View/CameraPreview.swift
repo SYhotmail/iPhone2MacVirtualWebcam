@@ -5,7 +5,8 @@
 //  Created by Siarhei Yakushevich on 16/04/2026.
 //
 
-import AVFoundation
+import Dispatch
+@preconcurrency import AVFoundation
 import Combine
 import SwiftUI
 import UIKit
@@ -15,6 +16,7 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     let frameProvider: any PreviewDecodedFrameProvidable
     
     typealias UIViewType = VideoView
+    typealias Coordinator = CameraPreviewCoordinator
     
     private func defineVideoView(_ nsView: PlatformViewType, context: Context) {
         let coordinator = context.coordinator
@@ -42,72 +44,7 @@ struct CameraPreview: PlatformNativeViewRepresentable {
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator()
-    }
-    
-    final class Coordinator: NSObject {
-        @Cancelling
-        var cancellable: AnyCancellable?
-        
-        var pipController: CameraPIPManager?
-        
-        lazy var doubleTapGesture: UITapGestureRecognizer! = {
-            let tap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(sender: )))
-            tap.numberOfTapsRequired = 2
-            return tap
-        }()
-        
-        private func addTapGesture(_ uiView: UIView) {
-            guard uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture } ) == nil else { return }
-            uiView.isUserInteractionEnabled = true
-            uiView.addGestureRecognizer(doubleTapGesture)
-        }
-        
-        private func removeTapGesture(_ uiView: UIView) {
-            guard let index = uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture } ) else {
-                return
-            }
-            uiView.gestureRecognizers?.remove(at: index)
-        }
-        
-        @objc private func handleDoubleTap(sender: UITapGestureRecognizer) {
-            guard let view = sender.view as? VideoView, let displayLayer = view.displayLayer else {
-                return
-            }
-            
-            switch displayLayer.videoGravity {
-            case .resizeAspect:
-                displayLayer.videoGravity = .resizeAspectFill
-            case .resizeAspectFill:
-                displayLayer.videoGravity = .resizeAspect
-            default:
-                break
-            }
-        }
-        
-        private func resetCancellable() {
-            cancellable = nil
-        }
-        
-        func undefineView(_ view: UIView) {
-            resetCancellable()
-            removeTapGesture(view)
-        }
-        
-        func bind(frameProvider: PreviewDecodedFrameProvidable, view: VideoView) {
-            bind(frameProvider: frameProvider, renderer: view.sampleBufferRenderer)
-            addTapGesture(view)
-        }
-        
-        private func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
-            guard let renderer else {
-                resetCancellable()
-                return
-            }
-            cancellable = frameProvider.decodedFrameSubject().onMainAnyPublisher().sink { [weak renderer] buffer in
-                renderer?.enqueue(buffer)
-            }
-        }
+        .init(queueLabel: "by.sy.FrontCameraContinuation.CameraPreview.render")
     }
 }
 
@@ -123,5 +60,54 @@ final class VideoView: UIView {
     
     var sampleBufferRenderer: AVSampleBufferVideoRenderer? {
         displayLayer?.sampleBufferRenderer
+    }
+}
+
+final class CameraPreviewCoordinator: SampleBufferRendererCoodinator {
+    
+    var pipController: CameraPIPManager?
+
+    lazy var doubleTapGesture: UITapGestureRecognizer! = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleDoubleTap(sender:)))
+        tap.numberOfTapsRequired = 2
+        return tap
+    }()
+
+    private func addTapGesture(_ uiView: UIView) {
+        guard uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture }) == nil else { return }
+        uiView.isUserInteractionEnabled = true
+        uiView.addGestureRecognizer(doubleTapGesture)
+    }
+
+    private func removeTapGesture(_ uiView: UIView) {
+        guard let index = uiView.gestureRecognizers?.firstIndex(where: { $0 === doubleTapGesture }) else {
+            return
+        }
+        uiView.gestureRecognizers?.remove(at: index)
+    }
+
+    @objc private func handleDoubleTap(sender: UITapGestureRecognizer) {
+        guard let view = sender.view as? VideoView, let displayLayer = view.displayLayer else {
+            return
+        }
+
+        switch displayLayer.videoGravity {
+        case .resizeAspect:
+            displayLayer.videoGravity = .resizeAspectFill
+        case .resizeAspectFill:
+            displayLayer.videoGravity = .resizeAspect
+        default:
+            break
+        }
+    }
+
+    func undefineView(_ view: UIView) {
+        unbind()
+        removeTapGesture(view)
+    }
+
+    func bind(frameProvider: PreviewDecodedFrameProvidable, view: VideoView) {
+        bind(frameProvider: frameProvider, renderer: view.sampleBufferRenderer)
+        addTapGesture(view)
     }
 }

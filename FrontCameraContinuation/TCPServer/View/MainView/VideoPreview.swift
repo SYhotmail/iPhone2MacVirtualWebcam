@@ -5,14 +5,13 @@
 //  Created by Siarhei Yakushevich on 16/04/2026.
 //
 
-
 import SwiftUI
-import Combine
 import CoreMedia
-internal import AVFoundation
+@preconcurrency import AVFoundation
 
 struct VideoPreview: PlatformNativeViewRepresentable {
     typealias NSViewType = VideoView
+    typealias Coordinator = SampleBufferRendererCoodinator
     
     let frameProvider: any PreviewDecodedFrameProvidable
     
@@ -32,29 +31,13 @@ struct VideoPreview: PlatformNativeViewRepresentable {
     }
     
     static func dismantleView(_ view: PlatformViewType, coordinator: Coordinator) {
-        coordinator.cancellable = nil
+        coordinator.unbind()
     }
     
     func makeCoordinator() -> Coordinator {
-        Coordinator()
+        .init(queueLabel: "by.sy.TCPServer.VideoPreview.render")
     }
     
-    final class Coordinator: NSObject {
-        @Cancelling
-        var cancellable: AnyCancellable?
-        
-        
-        func bind(frameProvider: PreviewDecodedFrameProvidable, renderer: AVSampleBufferVideoRenderer?) {
-            guard let renderer else {
-                cancellable = nil
-                return
-            }
-            
-            cancellable = frameProvider.decodedFrameSubject().onMainAnyPublisher().sink { [weak renderer] buffer in
-                renderer?.enqueue(buffer)
-            }
-        }
-    }
 }
 
 // MARK: - VideoView
@@ -81,4 +64,3 @@ final class VideoView: NSView {
         fatalError()
     }
 }
-
