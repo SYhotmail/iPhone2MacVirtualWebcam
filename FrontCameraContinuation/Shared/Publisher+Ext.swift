@@ -6,11 +6,14 @@
 //
 
 import Combine
+import Dispatch
 import Foundation
 
 extension Publisher {
     nonisolated
     func onMainAnyPublisher() -> AnyPublisher<Output, Failure> {
-        receive(on: RunLoop.main).eraseToAnyPublisher()
+        // AppKit live resize switches the main run loop into tracking modes, which can
+        // starve deliveries scheduled on RunLoop.main and cause preview frames to burst later.
+        receive(on: DispatchQueue.main).eraseToAnyPublisher()
     }
 }

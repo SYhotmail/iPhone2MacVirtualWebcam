@@ -34,21 +34,20 @@ actor H264Encoder {
     
     nonisolated
     func scheduleToEncode(imageBuffer: CVImageBuffer) {
-        
         let width = CVPixelBufferGetWidth(imageBuffer)
         let height = CVPixelBufferGetHeight(imageBuffer)
 
         let size = CGSize(width: width,
                           height: height)
-        let sendableImageBuffer = SendableImageBuffer(value: imageBuffer)
+        let sendableImageBuffer = SendableImageBuffer(value: imageBuffer) // wrapper around CVImageBuffer..
         
-        Task { [sendableImageBuffer] in
+        Task { @concurrent [sendableImageBuffer] in
             await self.encode(sendableImageBuffer, newSize: size)
         }
     }
 
     @discardableResult
-    private func encode(_ imageBuffer: SendableImageBuffer, newSize: CGSize) -> Bool {
+    private func encode(_ imageBuffer: sending SendableImageBuffer, newSize: CGSize) -> Bool {
         guard let session = compressionSession(newSize: newSize) else { return false }
 
         assert(!Thread.isMainThread)
