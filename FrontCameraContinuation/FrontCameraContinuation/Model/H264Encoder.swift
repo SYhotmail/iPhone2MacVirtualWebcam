@@ -1,92 +1,162 @@
-@preconcurrency import AVFoundation
+import AVFoundation
 import VideoToolbox
 import QuartzCore
 
-nonisolated
-final class H264Encoder {
-    typealias OutputHandler = (Data) -> Void
+actor H264Encoder {
+    typealias OutputHandler = @Sendable (Data) -> Void
+    
+    /// `CVImageBuffer` is a CF type and not modeled as `Sendable`, but we hand off
+    /// retained buffer references from the capture callback to the encoder actor.
+    /// The actor remains the only encoder-side consumer after scheduling.
+    private struct SendableImageBuffer: @unchecked Sendable {
+        let value: CVImageBuffer
+    }
 
     private static let annexBStartCode = [UInt8](arrayLiteral: 0, 0, 0, 1)
     private let expectedFrameRate: Int
-
+    private let maxKeyInterval: Int
+    
     private var compressionSession: VTCompressionSession?
     private var sentConfig = false
     private var frameIndex = 0
-    private var encodedWidth: Int32 = 0
-    private var encodedHeight: Int32 = 0
-    private let maxKeyInterval: Int
-    var outputHandler: OutputHandler!
+    private var encodedSize: CGSize = .zero
+    
+    private let outputHandler: OutputHandler
 
     init(expectedFrameRate: Int = VirtualCameraConfiguration.frameRate,
-         maxKeyInterval: Int = VirtualCameraConfiguration.frameRate) {
+         maxKeyInterval: Int = VirtualCameraConfiguration.frameRate,
+         outputHandler: @escaping OutputHandler) {
         assert(expectedFrameRate > 0 && maxKeyInterval > 0)
         self.expectedFrameRate = expectedFrameRate
         self.maxKeyInterval = maxKeyInterval
+        self.outputHandler = outputHandler
+    }
+    
+    nonisolated
+    func scheduleToEncode(imageBuffer: CVImageBuffer) {
+        
+        let width = CVPixelBufferGetWidth(imageBuffer)
+        let height = CVPixelBufferGetHeight(imageBuffer)
+
+        let size = CGSize(width: width,
+                          height: height)
+        let sendableImageBuffer = SendableImageBuffer(value: imageBuffer)
+        
+        Task { [sendableImageBuffer] in
+            await self.encode(sendableImageBuffer, newSize: size)
+        }
     }
 
-    func encode(_ sampleBuffer: CMSampleBuffer) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-              let session = compressionSession(for: pixelBuffer) else { return }
+    @discardableResult
+    private func encode(_ imageBuffer: SendableImageBuffer, newSize: CGSize) -> Bool {
+        guard let session = compressionSession(newSize: newSize) else { return false }
 
         assert(!Thread.isMainThread)
         
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
         frameIndex += 1
         let shouldForceKeyframe = frameIndex % maxKeyInterval == 0
-        let frameProperties: CFDictionary? = shouldForceKeyframe
-            ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] as CFDictionary
-            : nil
+        let frameProperties = shouldForceKeyframe
+        ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true] : nil
 
-        VTCompressionSessionEncodeFrame(
+        let firstParam = !sentConfig
+        
+        let res = VTCompressionSessionEncodeFrame(
             session,
-            imageBuffer: pixelBuffer,
+            imageBuffer: imageBuffer.value,
             presentationTimeStamp: pts,
             duration: .invalid,
-            frameProperties: frameProperties,
-            sourceFrameRefcon: nil,
-            infoFlagsOut: nil
-        )
+            frameProperties: frameProperties.flatMap { $0 as CFDictionary },
+            infoFlagsOut: nil) { status, flags, sampleBuffer in
+                guard status == noErr,
+                      let sampleBuffer,
+                      CMSampleBufferDataIsReady(sampleBuffer), let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return }
+                
+                let shouldSendConfig = firstParam || Self.shouldSendConfig(for: sampleBuffer)
+                
+                let formatDesc = shouldSendConfig ? CMSampleBufferGetFormatDescription(sampleBuffer) : nil
+                
+                guard let packetData = Self.makeAccessUnitPacket(formatDesc: formatDesc,
+                                                                 blockBuffer: blockBuffer,
+                                                                 includeParameterSets: shouldSendConfig) else {
+                    return
+                }
+                
+                Task { @concurrent [weak self] in
+                    guard let self else {
+                        return
+                    }
+                    assert(!Thread.isMainThread)
+                    
+                    outputHandler(packetData)
+                    
+                    if firstParam {
+                        await setSentConfig(true)
+                    }
+                }
+            }
+        
+        return res == noErr
+    }
+    
+    private func setSentConfig( _ sentConfig: Bool) {
+        self.sentConfig = sentConfig
     }
 
-    func invalidate() {
+    private func invalidate() {
         guard let compressionSession else { return }
 
         VTCompressionSessionCompleteFrames(compressionSession, untilPresentationTimeStamp: .invalid)
         VTCompressionSessionInvalidate(compressionSession)
-        self.compressionSession = nil
-        encodedWidth = 0
-        encodedHeight = 0
+        
+        resetSession()
+    }
+    
+    private func resetSession() {
+        compressionSession = nil
+        encodedSize = .zero
+        sentConfig = false
+        frameIndex = 0
+    }
+    
+    nonisolated
+    func scheduleToInvalidate() {
+        Task { @concurrent [weak self] in
+            await self?.invalidate()
+        }
     }
 
-    private func compressionSession(for pixelBuffer: CVPixelBuffer) -> VTCompressionSession? {
-        let width = Int32(CVPixelBufferGetWidth(pixelBuffer))
-        let height = Int32(CVPixelBufferGetHeight(pixelBuffer))
-
-        if compressionSession == nil || width != encodedWidth || height != encodedHeight {
-            setupEncoder(width: width, height: height)
+    private func compressionSession(newSize: CGSize) -> VTCompressionSession? {
+        if compressionSession == nil || newSize != encodedSize {
+            invalidate()
+            compressionSession = setupEncoder(size: newSize)
+            
+            if compressionSession != nil {
+                encodedSize = newSize
+            }
         }
 
         return compressionSession
     }
 
-    private func setupEncoder(width: Int32, height: Int32) {
-        invalidate()
-
+    private func setupEncoder(size: CGSize) -> VTCompressionSession? {
+        var compressionSession: VTCompressionSession?
+        
         let res = VTCompressionSessionCreate(
             allocator: nil,
-            width: width,
-            height: height,
+            width: Int32(size.width),
+            height: Int32(size.height),
             codecType: kCMVideoCodecType_H264,
             encoderSpecification: nil,
             imageBufferAttributes: nil,
             compressedDataAllocator: nil,
-            outputCallback: compressionCallback,
+            outputCallback: nil,
             refcon: UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque()),
             compressionSessionOut: &compressionSession
         )
 
         guard res == noErr, let compressionSession else {
-            return
+            return compressionSession
         }
 
         VTSessionSetProperty(compressionSession,
@@ -105,7 +175,7 @@ final class H264Encoder {
                              key: kVTCompressionPropertyKey_ProfileLevel,
                              value: kVTProfileLevel_H264_Baseline_AutoLevel)
 
-        let averageBitRate = targetBitRate(width: width, height: height)
+        let averageBitRate = Self.targetBitRate(size: size)
         VTSessionSetProperty(compressionSession,
                              key: kVTCompressionPropertyKey_AverageBitRate,
                              value: averageBitRate as CFTypeRef)
@@ -115,15 +185,12 @@ final class H264Encoder {
                              value: dataRateLimits as CFArray)
 
         VTCompressionSessionPrepareToEncodeFrames(compressionSession)
-
-        encodedWidth = width
-        encodedHeight = height
-        sentConfig = false
-        frameIndex = 0
+        
+        return compressionSession
     }
 
-    private func targetBitRate(width: Int32, height: Int32) -> Int {
-        let pixels = Int(width) * Int(height)
+    private static func targetBitRate(size: CGSize) -> Int {
+        let pixels = Int(size.width * size.height)
         switch pixels {
         case 0..<(640 * 480):
             return 1_000_000
@@ -136,52 +203,31 @@ final class H264Encoder {
         }
     }
 
-    private let compressionCallback: VTCompressionOutputCallback = { refCon, _, status, _, sampleBuffer in
-        guard status == noErr,
-              let sampleBuffer,
-              let refCon,
-              CMSampleBufferDataIsReady(sampleBuffer) else { return }
-
-        let encoder = Unmanaged<H264Encoder>.fromOpaque(refCon).takeUnretainedValue()
-
-        var shouldSentConfig = !encoder.sentConfig
-        if !shouldSentConfig {
-            let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true).flatMap { $0 as NSArray }
-            let dict = attachments?.firstObject as? NSDictionary
-            let notSync = dict?[kCMSampleAttachmentKey_NotSync] as? Bool
-            let isKeyframe = notSync != true
-            shouldSentConfig = isKeyframe
-        }
-        
-        guard let packet = encoder.makeAccessUnitPacket(from: sampleBuffer, includeParameterSets: shouldSentConfig),
-              let outputHandler = encoder.outputHandler else {
-            return
-        }
-
-        outputHandler(packet)
-
-        if shouldSentConfig {
-            encoder.sentConfig = true
-        }
+    private static func shouldSendConfig(for sampleBuffer: CMSampleBuffer) -> Bool {
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: true).flatMap { $0 as NSArray }
+        let dict = attachments?.firstObject as? NSDictionary
+        let notSync = dict?[kCMSampleAttachmentKey_NotSync] as? Bool
+        return notSync != true
     }
 
-    private func makeAccessUnitPacket(from sampleBuffer: CMSampleBuffer, includeParameterSets: Bool) -> Data? {
+    private static func makeAccessUnitPacket(formatDesc: CMFormatDescription?,
+                                             blockBuffer: CMBlockBuffer,
+                                             includeParameterSets: Bool) -> Data? {
         var packet = Data()
-
-        if includeParameterSets, !appendParameterSets(from: sampleBuffer, to: &packet) {
+        
+        guard !includeParameterSets || formatDesc.flatMap({ appendParameterSets(formatDesc: $0, to: &packet) }) == true else {
             return nil
         }
 
-        guard appendNALUnits(from: sampleBuffer, to: &packet), !packet.isEmpty else {
+        guard appendNALUnits(blockBuffer: blockBuffer, to: &packet) else {
             return nil
         }
 
-        return packet
+        return !packet.isEmpty ? packet : nil
     }
 
-    private func appendParameterSets(from sampleBuffer: CMSampleBuffer, to packet: inout Data) -> Bool {
-        guard let formatDesc = CMSampleBufferGetFormatDescription(sampleBuffer) else { return false }
-
+    private static func appendParameterSets(formatDesc: CMFormatDescription,
+                                            to packet: inout Data) -> Bool {
         var spsPointer: UnsafePointer<UInt8>?
         var spsSize = 0
         var spsCount = 0
@@ -218,8 +264,8 @@ final class H264Encoder {
         return true
     }
 
-    private func appendNALUnits(from sampleBuffer: CMSampleBuffer, to packet: inout Data) -> Bool {
-        guard let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else { return false }
+    private static func appendNALUnits(blockBuffer: CMBlockBuffer?, to packet: inout Data) -> Bool {
+        guard let blockBuffer else { return false }
 
         var length = 0
         var totalLength = 0
@@ -251,9 +297,9 @@ final class H264Encoder {
         return true
     }
 
-    private func appendAnnexBPacket(bytes: UnsafePointer<UInt8>, count: Int, to packet: inout Data) {
-        packet.reserveCapacity(packet.count + Self.annexBStartCode.count + count)
-        packet.append(contentsOf: Self.annexBStartCode)
+    private static func appendAnnexBPacket(bytes: UnsafePointer<UInt8>, count: Int, to packet: inout Data) {
+        packet.reserveCapacity(packet.count + annexBStartCode.count + count)
+        packet.append(contentsOf: annexBStartCode)
         packet.append(bytes, count: count)
     }
 }

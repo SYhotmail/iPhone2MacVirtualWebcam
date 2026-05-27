@@ -87,7 +87,7 @@ final class ConnectionManager: @unchecked Sendable {
             debugPrint("!!! newHasBetterPath \(newHasBetterPath)")
         }
 
-        connection.start(queue: .global())
+        connection.start(queue: .global(qos: .userInitiated))
         self.connection = connection
         return true
     }
@@ -110,7 +110,7 @@ final class ConnectionManager: @unchecked Sendable {
     }
 
     func send(_ data: Data) {
-        let packet = packetizedData(data)
+        let packet = Self.packetizedData(data)
         connection?.send(content: packet, contentContext: .defaultMessage, isComplete: true, completion: .contentProcessed({ error in
             guard let error else { return }
             debugPrint("❌ Error: \(error.localizedDescription)")
@@ -118,7 +118,7 @@ final class ConnectionManager: @unchecked Sendable {
         }))
     }
 
-    private func packetizedData(_ data: Data) -> Data {
+    private static func packetizedData(_ data: Data) -> Data {
         let capacity = data.count
         var size = UInt32(capacity).bigEndian //TODO: think about capacity writer...
         var packet = Data()

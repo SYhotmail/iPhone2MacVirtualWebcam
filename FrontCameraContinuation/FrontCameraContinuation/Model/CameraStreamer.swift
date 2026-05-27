@@ -20,7 +20,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
 
     private let captureSessionManager = CaptureSessionManager()
     private let connectionManager = ConnectionManager()
-    private let encoder = H264Encoder()
+    private var encoder: H264Encoder!
     private let reconnectQueue = DispatchQueue(label: "camera.streamer.reconnect", qos: .utility)
     private var reconnectWorkItem: DispatchWorkItem? {
         didSet {
@@ -42,6 +42,10 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
 
     override init() {
         super.init()
+        
+        encoder = .init(outputHandler: { [weak self] data in
+            self?.send(data)
+        })
         bind()
     }
     
@@ -49,10 +53,6 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         bindConnectionManager()
         
         bindCaptureSessionManager()
-        
-        encoder.outputHandler = { [weak self] packet in
-            self?.send(packet)
-        }
     }
     
     private func bindConnectionManager() {
@@ -101,7 +101,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
     
     private func encoderInvalidate() {
-        encoder.invalidate()
+        encoder.scheduleToInvalidate()
     }
     
     func stopStreaming() {
@@ -184,12 +184,12 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
 
     // MARK: - Capture delegate
-
+    nonisolated
     func captureOutput(_ output: AVCaptureOutput,
                        didOutput sampleBuffer: CMSampleBuffer,
                        from connection: AVCaptureConnection) {
         sampleBufferPublisher.send(sampleBuffer)
-        guard shouldAutoResume else { return }
-        encoder.encode(sampleBuffer)
+        guard shouldAutoResume, let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        encoder.scheduleToEncode(imageBuffer: imageBuffer)
     }
 }
