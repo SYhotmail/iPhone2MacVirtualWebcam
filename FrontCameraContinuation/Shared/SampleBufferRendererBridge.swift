@@ -36,6 +36,10 @@ final class SampleBufferRendererBridge {
                 renderer.enqueue(sampleBuffer)
             }
     }
+    
+    func unbind() {
+        cancellable = nil
+    }
 }
 
 open class SampleBufferRendererCoodinator: NSObject {
@@ -47,7 +51,7 @@ open class SampleBufferRendererCoodinator: NSObject {
     }
     
     func unbind() {
-        bridge.cancellable = nil
+        bridge.unbind()
     }
     
     func bind(frameProvider: any PreviewDecodedFrameProvidable,
