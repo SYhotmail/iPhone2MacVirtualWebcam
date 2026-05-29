@@ -88,12 +88,17 @@ struct LocalNetworkAddressProvider: IPAddressProvidable {
 
             guard result == 0 else { continue }
 
-            let address = String(cString: hostBuffer)
-            if !addresses.contains(address) {
+            let address = hostBuffer.filter { $0 != 0 }.map { CUnsignedChar($0) }.withUnsafeBufferPointer {
+                String(bytes: $0, encoding: .utf8)
+            }
+            
+            assert(address != nil)
+            
+            if let address, !addresses.contains(address) {
                 addresses.append(address)
             }
         }
-
+        
         return addresses
     }
 }

@@ -245,7 +245,8 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
                 continue
             }
 
-            var deviceUID: CFString = "" as CFString
+            var deviceUID: UnsafeMutableRawPointer?
+            
             guard CMIOObjectGetPropertyData(
                 deviceID,
                 &uidAddress,
@@ -254,11 +255,13 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
                 uidDataSize,
                 &dataUsed,
                 &deviceUID
-            ) == noErr else {
+            ) == noErr, let deviceUID else {
                 continue
             }
 
-            if deviceUID as String == uid {
+            let cfUID = Unmanaged<CFString>.fromOpaque(deviceUID).takeUnretainedValue()
+            let uidString = cfUID as String
+            if uidString == uid {
                 logger.debug("Matched AVCapture device uid=\(uid, privacy: .public) to CMIO device \(deviceID)")
                 return deviceID
             }
