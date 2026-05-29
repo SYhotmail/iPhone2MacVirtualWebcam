@@ -6,8 +6,10 @@
 //
 @preconcurrency import AVFoundation
 import AVKit
+import Combine
 
 final class CameraPIPManager: NSObject {
+    nonisolated
     private enum Constants {
         static let preferredContentSize = CGSize(width: 1080, height: 1920)
         static let startRetries = 8
@@ -15,22 +17,12 @@ final class CameraPIPManager: NSObject {
     }
 
     private var pipController: AVPictureInPictureController?
-    private var isPossibleObservation: NSKeyValueObservation? {
-        didSet {
-            guard let oldValue, oldValue !== isPossibleObservation else {
-                return
-            }
-            oldValue.invalidate()
-        }
-    }
-    private var pendingStartTask: Task<Void, Never>? {
-        didSet {
-            guard let oldValue else {
-                return
-            }
-            oldValue.cancel()
-        }
-    }
+    
+    @Cancelling
+    private var isPossibleObservation: NSKeyValueObservation?
+    @Cancelling
+    private var pendingStartTask: Task<Void, Never>?
+    
     private weak var sourceView: VideoView?
     private let contentViewController = VideoCallPictureInPictureContentViewController()
     private let previewRendererBridge = SampleBufferRendererBridge(
@@ -38,6 +30,7 @@ final class CameraPIPManager: NSObject {
     )
     private let audioSession: AVAudioSession
     private var shouldStartWhenPossible = false
+    private var frameObservation: AnyCancellable?
     
     init(audioSession: AVAudioSession = .sharedInstance()) {
         self.audioSession = audioSession
@@ -72,6 +65,7 @@ final class CameraPIPManager: NSObject {
     
     private func unbind() {
         previewRendererBridge.unbind()
+        frameObservation = nil
     }
 
     func startPIP() {
@@ -98,6 +92,48 @@ final class CameraPIPManager: NSObject {
 
         previewRendererBridge.bind(frameProvider: frameProvider,
                                    renderer: sampleBufferRenderer)
+        observeFrames(frameProvider: frameProvider)
+    }
+
+    private func observeFrames(frameProvider: any PreviewDecodedFrameProvidable) {
+        frameObservation = frameProvider.decodedFrameSubject()
+            .compactMap(Self.preferredContentSize(for:))
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] preferredContentSize in
+                guard let self else {
+                    return
+                }
+                self.preferredContentSize = preferredContentSize
+            }
+    }
+    
+    private var preferredContentSize: CGSize {
+        get {
+            contentViewController.preferredContentSize
+        }
+        set {
+            contentViewController.preferredContentSize = newValue
+        }
+    }
+
+    nonisolated
+    private static func preferredContentSize(for sampleBuffer: CMSampleBuffer) -> CGSize? {
+        guard let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer) else {
+            return nil
+        }
+
+        let dimensions = CMVideoFormatDescriptionGetPresentationDimensions(
+            formatDescription,
+            usePixelAspectRatio: true,
+            useCleanAperture: true
+        )
+
+        guard dimensions.width > 0, dimensions.height > 0 else {
+            return nil
+        }
+        
+        return dimensions
     }
     
     @discardableResult
@@ -147,7 +183,7 @@ final class CameraPIPManager: NSObject {
             return
         }
 
-        contentViewController.preferredContentSize = Constants.preferredContentSize
+        preferredContentSize = Constants.preferredContentSize
         let contentSource = AVPictureInPictureController.ContentSource(
             activeVideoCallSourceView: sourceView,
             contentViewController: contentViewController
