@@ -7,6 +7,7 @@
 
 import Combine
 import Dispatch
+import Foundation
 
 /// Types that should be cancelled when replaced in `Cancelling`.
 public protocol CancelOnReplacement {
@@ -30,6 +31,12 @@ extension DispatchWorkItem: CancelOnReplacement {
 extension Task: CancelOnReplacement {
     public func cancelOnReplacement() {
         cancel()
+    }
+}
+
+extension NSKeyValueObservation: CancelOnReplacement {
+    public func cancelOnReplacement() {
+        invalidate()
     }
 }
 
