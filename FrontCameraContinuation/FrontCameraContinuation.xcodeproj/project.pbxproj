@@ -64,6 +64,13 @@
 			);
 			target = 215482BF2F91423800163538 /* FrontCameraContinuation */;
 		};
+		B10000070000000000000001 /* Exceptions for "TCPServer" folder in "Cam2Mac" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 215482D52F9143A900163538 /* Cam2Mac */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -85,6 +92,9 @@
 		};
 		215482D72F9143A900163538 /* TCPServer */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				B10000070000000000000001 /* Exceptions for "TCPServer" folder in "Cam2Mac" target */,
+			);
 			path = TCPServer;
 			sourceTree = "<group>";
 		};
@@ -542,7 +552,7 @@
 				INFOPLIST_FILE = FrontCameraContinuation/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Privacy - Camera Usage Description";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Stream camera video";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -581,7 +591,7 @@
 				INFOPLIST_FILE = FrontCameraContinuation/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
-				INFOPLIST_KEY_NSCameraUsageDescription = "Privacy - Camera Usage Description";
+				INFOPLIST_KEY_NSCameraUsageDescription = "Stream camera video";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -635,11 +645,13 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TCPServer/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Cam2Mac needs camera access to discover and feed the virtual camera device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use front camera as a system camera";
+				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use the camera as a virtual camera";
+				INFOPLIST_OUTPUT_FORMAT = binary;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -688,11 +700,13 @@
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = TCPServer/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = Cam2Mac;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Cam2Mac needs camera access to discover and feed the virtual camera device.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use front camera as a system camera";
+				INFOPLIST_KEY_NSSystemExtensionUsageDescription = "Use the camera as a virtual camera";
+				INFOPLIST_OUTPUT_FORMAT = binary;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
