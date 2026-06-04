@@ -16,8 +16,8 @@ final class ServerManager: @unchecked Sendable {
     private let server = TCPServer()
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
-    private nonisolated(unsafe) var decodedFrameCancellable: AnyCancellable?
-    private nonisolated(unsafe) var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
+    private var decodedFrameCancellable: AnyCancellable?
+    private var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
     let decoder = H264Decoder()
     
     let lock = Mutex(())
@@ -28,9 +28,9 @@ final class ServerManager: @unchecked Sendable {
             return value
         }
         
-        let _sharedFrameProvider = decoder.decodedFramePublisher
+        let _sharedFrameProvider = decoder.publisher
             .receive(on: DispatchQueue.global(qos: .userInitiated))
-            .eraseToAnyPublisher()
+            .map { $0.value }
             .compactMap { [weak self] sampleBuffer in
                 self?.frameConverter.makeSampleBuffer(from: sampleBuffer)
             }
@@ -72,11 +72,11 @@ final class ServerManager: @unchecked Sendable {
             }
 
         server.onFrame = { [weak self] data in
-            self?.decoder.decode(data)
+            self?.decoder.scheduleToDecode(data)
         }
 
         server.onStreamUnavailable = { [weak self] in
-            self?.resetDecoder()
+            self?.decoder.scheduleToReset()
         }
     }
     
@@ -89,7 +89,7 @@ final class ServerManager: @unchecked Sendable {
     }
     
     private func resetDecoder() {
-        decoder.reset()
+        decoder.scheduleToReset()
     }
     
     func stop() {

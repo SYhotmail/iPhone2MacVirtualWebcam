@@ -61,7 +61,6 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
             return
         }
         
-        debugPrint("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
         logger.debug("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
     }
     

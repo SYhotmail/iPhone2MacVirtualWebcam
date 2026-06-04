@@ -101,10 +101,7 @@ final class CameraPIPManager: NSObject {
             .removeDuplicates()
             .receive(on: DispatchQueue.main)
             .sink { [weak self] preferredContentSize in
-                guard let self else {
-                    return
-                }
-                self.preferredContentSize = preferredContentSize
+                self?.preferredContentSize = preferredContentSize
             }
     }
     

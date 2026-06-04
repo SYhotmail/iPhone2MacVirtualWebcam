@@ -8,7 +8,7 @@
 
 import VideoToolbox
 import QuartzCore
-import Combine
+@preconcurrency import Combine
 import Synchronization
 
 nonisolated
@@ -67,57 +67,55 @@ final class StreamDiagnostics: @unchecked Sendable {
 }
 
 
-protocol Decoding {
-    func decode( _data: Data)
-    func reset()
-}
-
-nonisolated
-final class H264Decoder: @unchecked Sendable {
+actor H264Decoder {
+    
+    public struct SendableSampleBuffer: @unchecked Sendable {
+        let value: CMSampleBuffer
+    }
+    
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
 
     private var sps: Data?
     private var pps: Data?
-    let decodedFramePublisher = PassthroughSubject<CMSampleBuffer, Never>()
     
+    nonisolated private let decodedFramePublisher = PassthroughSubject<SendableSampleBuffer, Never>()
+    nonisolated let streamDiagnostics: StreamDiagnostics
     
-    let queue: OperationQueue
-    let streamDiagnostics: StreamDiagnostics
+    nonisolated var publisher: AnyPublisher<SendableSampleBuffer, Never> {
+        decodedFramePublisher.eraseToAnyPublisher()
+    }
     
     init(streamDiagnostics: StreamDiagnostics = .shared) {
         self.streamDiagnostics = streamDiagnostics
-        let queue = OperationQueue()
-        queue.qualityOfService = .userInitiated
-        // H.264 access units must stay in order for the decompression session.
-        queue.maxConcurrentOperationCount = 1
-        queue.name = "by.sy.H264Decoder.decodeQueue"
-        self.queue = queue
     }
     
-    func reset() {
-        queue.addOperation { [weak self] in
-            guard let self, !self.queue.isSuspended else {
-                return
-            }
-            self.resetForStreamCore()
+    nonisolated
+    func scheduleToDecode(_ data: Data) {
+        Task { [weak self, data] in
+            await self?.decode(data)
         }
     }
+
+    nonisolated
+    func scheduleToReset() {
+        Task { [weak self] in
+            await self?.reset()
+        }
+    }
+
+    private func reset() {
+        resetForStreamCore()
+    }
     
-    func decode(_ data: Data) {
+    private func decode(_ data: Data) {
         streamDiagnostics.mark(.tcpReceived)
         guard data.count > 4 else { return }
         streamDiagnostics.mark(.decodeRequested)
         let nalUnits = Self.splitAnnexBNALUnits(in: data)
         guard !nalUnits.isEmpty else { return }
-
-        queue.addOperation { [weak self] in
-            guard let self, !self.queue.isSuspended else {
-                return
-            }
-            streamDiagnostics.mark(.decodeSubmitted)
-            self.decodeAccessUnit(nalUnits)
-        }
+        streamDiagnostics.mark(.decodeSubmitted)
+        decodeAccessUnit(nalUnits)
     }
     
     private func decodeAccessUnit(_ nalUnits: [Data]) {
@@ -323,8 +321,12 @@ final class H264Decoder: @unchecked Sendable {
         }
 
         let decoder = Unmanaged<H264Decoder>.fromOpaque(refCon).takeUnretainedValue()
-
-        decoder.handleDecodedFrame(imageBuffer)
+        guard let sampleBuffer = makeSampleBuffer(from: imageBuffer) else { return }
+        let value = SendableSampleBuffer(value: sampleBuffer)
+        
+        Task { @concurrent in
+            await decoder.handleDecodedFrame(value)
+        }
     }
     
     private static func makeSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
@@ -335,7 +337,7 @@ final class H264Decoder: @unchecked Sendable {
             formatDescriptionOut: &format
         )
         
-        guard let format = Self.valueOnStatusSuccess(format, status: status) else { return nil }
+        guard let format = valueOnStatusSuccess(format, status: status) else { return nil }
 
         var timing = CMSampleTimingInfo(
             duration: .invalid,
@@ -355,7 +357,7 @@ final class H264Decoder: @unchecked Sendable {
             sampleBufferOut: &sampleBuffer
         )
 
-        guard let sampleBuffer = Self.valueOnStatusSuccess(sampleBuffer, status: bufferStatus) else {
+        guard let sampleBuffer = valueOnStatusSuccess(sampleBuffer, status: bufferStatus) else {
             return nil
         }
 
@@ -436,8 +438,7 @@ final class H264Decoder: @unchecked Sendable {
         return nalType == 7 || nalType == 8 || nalType == 5
     }
 
-    private func handleDecodedFrame(_ pixelBuffer: CVImageBuffer) {
-        guard let sampleBuffer = Self.makeSampleBuffer(from: pixelBuffer) else { return }
+    private func handleDecodedFrame(_ sampleBuffer: sending SendableSampleBuffer) {
         streamDiagnostics.mark(.decodeOutput)
         decodedFramePublisher.send(sampleBuffer)
     }
