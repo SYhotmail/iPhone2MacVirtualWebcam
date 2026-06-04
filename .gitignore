@@ -39,3 +39,6 @@ fastlane/test_output
 FrontCameraContinuation/FrontCameraContinuation.xcodeproj/xcuserdata/
 FrontCameraContinuation/FrontCameraContinuation.xcodeproj/project.xcworkspace/
 .agents
+
+H264/.build
+

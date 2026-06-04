@@ -8,6 +8,7 @@
 import Foundation
 import Combine
 import CoreMedia
+import H264
 import Network
 import Synchronization
 

@@ -9,6 +9,7 @@
 @preconcurrency import AVFoundation
 import UIKit
 import Combine
+import H264
 
 nonisolated
 final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOutputSampleBufferDelegate {
@@ -39,9 +40,13 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     override init() {
         super.init()
         
-        encoder = .init(outputHandler: { [weak self] data in
-            self?.send(data)
-        })
+        encoder = .init(
+            expectedFrameRate: VirtualCameraConfiguration.frameRate,
+            maxKeyInterval: VirtualCameraConfiguration.frameRate,
+            outputHandler: { [weak self] data in
+                self?.send(data)
+            }
+        )
         bind()
     }
     

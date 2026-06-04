@@ -1,15 +1,8 @@
-//
-//  H264Decoder.swift
-//  FrontCameraContinuation
-//
-//  Created by Siarhei Yakushevich on 16/04/2026.
-//
-
-
-import VideoToolbox
+import CoreMedia
 import QuartzCore
-@preconcurrency import Combine
 import Synchronization
+@preconcurrency import Combine
+import VideoToolbox
 
 nonisolated
 final class StreamDiagnostics: @unchecked Sendable {
@@ -57,48 +50,47 @@ final class StreamDiagnostics: @unchecked Sendable {
 
         debugPrint("STREAM STATS", snapshot.joined(separator: " "))
     }
-    
+
     func mark(_ counter: Counter, amount: Int = 1) {
         lock.withLock { _ in
             self.markCore(counter, amount: amount)
         }
-        
     }
 }
 
-
-actor H264Decoder {
-    
+public actor H264Decoder {
     public struct SendableSampleBuffer: @unchecked Sendable {
-        let value: CMSampleBuffer
+        public let value: CMSampleBuffer
+
+        public init(value: CMSampleBuffer) {
+            self.value = value
+        }
     }
-    
+
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
 
     private var sps: Data?
     private var pps: Data?
-    
+
     nonisolated private let decodedFramePublisher = PassthroughSubject<SendableSampleBuffer, Never>()
     nonisolated let streamDiagnostics: StreamDiagnostics
-    
-    nonisolated var publisher: AnyPublisher<SendableSampleBuffer, Never> {
+
+    nonisolated public var publisher: AnyPublisher<SendableSampleBuffer, Never> {
         decodedFramePublisher.eraseToAnyPublisher()
     }
-    
-    init(streamDiagnostics: StreamDiagnostics = .shared) {
-        self.streamDiagnostics = streamDiagnostics
+
+    public init() {
+        self.streamDiagnostics = .shared
     }
-    
-    nonisolated
-    func scheduleToDecode(_ data: Data) {
+
+    nonisolated public func scheduleToDecode(_ data: Data) {
         Task { [weak self, data] in
             await self?.decode(data)
         }
     }
 
-    nonisolated
-    func scheduleToReset() {
+    nonisolated public func scheduleToReset() {
         Task { [weak self] in
             await self?.reset()
         }
@@ -107,27 +99,33 @@ actor H264Decoder {
     private func reset() {
         resetForStreamCore()
     }
-    
+
     private func decode(_ data: Data) {
         streamDiagnostics.mark(.tcpReceived)
-        guard data.count > 4 else { return }
+        guard data.count > 4 else {
+            return
+        }
         streamDiagnostics.mark(.decodeRequested)
         let nalUnits = Self.splitAnnexBNALUnits(in: data)
-        guard !nalUnits.isEmpty else { return }
+        guard !nalUnits.isEmpty else {
+            return
+        }
         streamDiagnostics.mark(.decodeSubmitted)
         decodeAccessUnit(nalUnits)
     }
-    
+
     private func decodeAccessUnit(_ nalUnits: [Data]) {
         var frameNALUnits = [Data]()
         frameNALUnits.reserveCapacity(nalUnits.count)
 
         for nalUnit in nalUnits {
-            guard nalUnit.count > 4 else { continue }
+            guard nalUnit.count > 4 else {
+                continue
+            }
             let nalType = nalUnit[4] & 0x1F
 
             switch nalType {
-            case 7: // SPS
+            case 7:
                 let newSPS = nalUnit.advanced(by: 4)
                 if sps != newSPS {
                     resetDecoder()
@@ -136,7 +134,7 @@ actor H264Decoder {
                 sps = newSPS
                 createSessionFormatDescriptionOnNeed()
 
-            case 8: // PPS
+            case 8:
                 let newPPS = nalUnit.advanced(by: 4)
                 if pps != newPPS {
                     resetDecoder()
@@ -144,7 +142,7 @@ actor H264Decoder {
                 pps = newPPS
                 createSessionFormatDescriptionOnNeed()
 
-            case 9: // AUD
+            case 9:
                 continue
 
             default:
@@ -165,12 +163,12 @@ actor H264Decoder {
         }
         setSessionAndFormatDescription(with: nil)
     }
-    
+
     private func setSessionAndFormatDescription(with description: CMFormatDescription?) {
-        self.formatDescription = description
+        formatDescription = description
         session = description.flatMap { createDecompressionSession(formatDescription: $0) }
     }
-    
+
     private func resetForStreamCore() {
         resetDecoder()
         sps = nil
@@ -178,22 +176,25 @@ actor H264Decoder {
     }
 
     private func createSessionFormatDescriptionOnNeed() {
-        guard session == nil else { return }
-        guard let sps, let pps else { return }
+        guard session == nil else {
+            return
+        }
+        guard let sps, let pps else {
+            return
+        }
 
         let formatDescription: CMFormatDescription? = sps.withUnsafeBytes { spsPtr in
             pps.withUnsafeBytes { ppsPtr in
-                
                 let ptrs = [spsPtr, ppsPtr]
                 let parameterSetPointers = ptrs.map { $0.bindMemory(to: UInt8.self).baseAddress }.compactMap { $0 }
-                
+
                 guard parameterSetPointers.count == ptrs.count else {
                     return nil
                 }
 
                 let parameterSetSizes = ptrs.map(\.count)
                 assert(parameterSetSizes.count == 2)
-                
+
                 var formatDescription: CMFormatDescription?
                 let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
                     allocator: kCFAllocatorDefault,
@@ -203,15 +204,15 @@ actor H264Decoder {
                     nalUnitHeaderLength: 4,
                     formatDescriptionOut: &formatDescription
                 )
-                
+
                 guard let formatDescription = Self.valueOnStatusSuccess(formatDescription, status: status) else {
                     return nil
                 }
-                
+
                 return formatDescription
             }
         }
-        
+
         setSessionAndFormatDescription(with: formatDescription)
     }
 
@@ -234,19 +235,24 @@ actor H264Decoder {
     }
 
     private func decodeFrame(_ nalUnits: [Data], session: VTDecompressionSession, formatDescription: CMFormatDescription) {
-        guard !nalUnits.isEmpty else { return }
+        guard !nalUnits.isEmpty else {
+            return
+        }
 
-        // Convert Annex-B access unit → AVCC by length-prefixing each NAL in the frame.
         assert(!Thread.isMainThread)
         var buffer = Data()
         for nalUnit in nalUnits {
-            guard nalUnit.count > 4 else { continue }
+            guard nalUnit.count > 4 else {
+                continue
+            }
             var length = UInt32(nalUnit.count - 4).bigEndian
             buffer.append(Data(bytes: &length, count: 4))
             buffer.append(nalUnit.advanced(by: 4))
         }
 
-        guard !buffer.isEmpty else { return }
+        guard !buffer.isEmpty else {
+            return
+        }
 
         var blockBuffer: CMBlockBuffer?
         let status = CMBlockBufferCreateWithMemoryBlock(
@@ -260,8 +266,10 @@ actor H264Decoder {
             flags: 0,
             blockBufferOut: &blockBuffer
         )
-        
-        guard let blockBuffer = Self.valueOnStatusSuccess(blockBuffer, status: status) else { return }
+
+        guard let blockBuffer = Self.valueOnStatusSuccess(blockBuffer, status: status) else {
+            return
+        }
 
         let replaceStatus = buffer.withUnsafeBytes { ptr in
             ptr.baseAddress.flatMap { baseAddress in
@@ -273,8 +281,10 @@ actor H264Decoder {
                 )
             }
         }
-        
-        guard Self.valueOnStatusSuccess((), status: replaceStatus) != nil else { return }
+
+        guard Self.valueOnStatusSuccess((), status: replaceStatus) != nil else {
+            return
+        }
 
         var sampleBuffer: CMSampleBuffer?
         var timing = CMSampleTimingInfo(
@@ -295,7 +305,9 @@ actor H264Decoder {
             sampleBufferOut: &sampleBuffer
         )
 
-        guard let sampleBuffer = Self.valueOnStatusSuccess(sampleBuffer, status: createStatus) else { return }
+        guard let sampleBuffer = Self.valueOnStatusSuccess(sampleBuffer, status: createStatus) else {
+            return
+        }
 
         var flags = VTDecodeInfoFlags()
         let decodeStatus = VTDecompressionSessionDecodeFrame(
@@ -305,7 +317,7 @@ actor H264Decoder {
             frameRefcon: nil,
             infoFlagsOut: &flags
         )
-        
+
         guard Self.valueOnStatusSuccess(flags, status: decodeStatus) != nil else {
             streamDiagnostics.mark(.decodeError)
             return
@@ -314,21 +326,25 @@ actor H264Decoder {
 
     private static let decompressionCallback: VTDecompressionOutputCallback = {
         (refCon, _, status, _, imageBuffer, _, _) in
-        guard let refCon else { return }
+        guard let refCon else {
+            return
+        }
         guard let imageBuffer = valueOnStatusSuccess(imageBuffer, status: status) else {
             StreamDiagnostics.shared.mark(.decodeError)
             return
         }
 
         let decoder = Unmanaged<H264Decoder>.fromOpaque(refCon).takeUnretainedValue()
-        guard let sampleBuffer = makeSampleBuffer(from: imageBuffer) else { return }
+        guard let sampleBuffer = makeSampleBuffer(from: imageBuffer) else {
+            return
+        }
         let value = SendableSampleBuffer(value: sampleBuffer)
-        
+
         Task { @concurrent in
             await decoder.handleDecodedFrame(value)
         }
     }
-    
+
     private static func makeSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
         var format: CMFormatDescription?
         let status = CMVideoFormatDescriptionCreateForImageBuffer(
@@ -336,8 +352,10 @@ actor H264Decoder {
             imageBuffer: pixelBuffer,
             formatDescriptionOut: &format
         )
-        
-        guard let format = valueOnStatusSuccess(format, status: status) else { return nil }
+
+        guard let format = valueOnStatusSuccess(format, status: status) else {
+            return nil
+        }
 
         var timing = CMSampleTimingInfo(
             duration: .invalid,
@@ -382,18 +400,20 @@ actor H264Decoder {
             Unmanaged.passUnretained(kCFBooleanTrue).toOpaque()
         )
     }
-    
+
     private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus) -> T! {
-        guard status == noErr else { return nil }
+        guard status == noErr else {
+            return nil
+        }
         assert(value != nil)
         return value
     }
-    
+
     private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus?) -> T! {
         status.flatMap { valueOnStatusSuccess(value, status: $0) }
     }
 
-    private static func splitAnnexBNALUnits(in data: Data) -> [Data] {
+    @_spi(Testing) public static func splitAnnexBNALUnits(in data: Data) -> [Data] {
         let bytes = [UInt8](data)
         guard bytes.count >= 5 else {
             return []
