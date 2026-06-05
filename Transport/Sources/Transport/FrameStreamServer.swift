@@ -119,7 +119,7 @@ public actor FrameStreamServer {
     private func bind(to connection: any TransportConnection) {
         connection.stateUpdateHandler = { [weak self] connectionState in
             guard let self else { return }
-            Task {
+            Task { 
                 await self.handleConnectionStateUpdate(connectionState, for: connection)
             }
         }
@@ -140,74 +140,82 @@ public actor FrameStreamServer {
     }
 
     private func receive(from connection: any TransportConnection) {
-        readSize(from: connection)
+        Task {
+            await readSize(from: connection)
+        }
     }
 
     private func cancelAndClose(_ connection: any TransportConnection) {
         close(connection, cancel: true)
     }
 
-    private func readSize(from connection: any TransportConnection) {
+    private func readSize(from connection: any TransportConnection) async {
         let headerByteCount = FramePacket.headerByteCount
-        connection.receive(
-            minimumIncompleteLength: headerByteCount,
-            maximumLength: headerByteCount
-        ) { [weak self] chunk, _, _, error in
-            guard let self else { return }
-
-            guard let chunk, chunk.count == headerByteCount else {
-                debugPrint("❌ Failed to read size:", error ?? "unknown")
-                Task {
-                    await self.cancelAndClose(connection)
-                }
-                return
-            }
-
-            Task {
-                let expectedSize = FramePacket.packetSize(for: chunk)
-                
-                await self.readFrame(from: connection, expectedSize: Int(expectedSize), buffer: Data())
-            }
+        let result: TransportReceiveResult
+        do {
+            result = try await connection.receive(
+                minimumIncompleteLength: headerByteCount,
+                maximumLength: headerByteCount
+            )
+        } catch {
+            debugPrint("❌ Failed to read size:", error)
+            cancelAndClose(connection)
+            return
         }
+
+        let chunk = result.data
+        guard chunk.count == headerByteCount else {
+            debugPrint("❌ Failed to read size: invalid header length \(chunk.count)")
+            cancelAndClose(connection)
+            return
+        }
+
+        let expectedSize = FramePacket.packetSize(for: chunk)
+        await readFrame(from: connection, expectedSize: Int(expectedSize), buffer: Data())
     }
 
-    private func readFrame(from connection: any TransportConnection, expectedSize: Int, buffer: Data) {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: expectedSize - buffer.count) { [weak self] chunk, _, _, error in
-            guard let self else { return }
+    private func readFrame(from connection: any TransportConnection, expectedSize: Int, buffer: Data) async {
+        let result: TransportReceiveResult
+        do {
+            result = try await connection.receive(
+                minimumIncompleteLength: 1,
+                maximumLength: expectedSize - buffer.count
+            )
+        } catch {
+            debugPrint("❌ Failed to read frame:", error)
+            cancelAndClose(connection)
+            return
+        }
 
-            guard let chunk, !chunk.isEmpty else {
-                debugPrint("❌ Failed to read frame:", error ?? "unknown")
-                Task {
-                    await self.cancelAndClose(connection)
-                }
-                return
-            }
+        let chunk = result.data
+        guard !chunk.isEmpty else {
+            debugPrint("❌ Failed to read frame: empty payload")
+            cancelAndClose(connection)
+            return
+        }
 
-            Task {
-                var newBuffer = buffer
-                newBuffer.append(chunk)
-                
-                if newBuffer.count < expectedSize {
-                    await self.readFrame(from: connection, expectedSize: expectedSize, buffer: newBuffer)
-                } else {
-                    await self.finishReceivingFrame(newBuffer, from: connection)
-                }
-            }
+        var newBuffer = buffer
+        newBuffer.append(chunk)
+
+        if newBuffer.count < expectedSize {
+            await readFrame(from: connection, expectedSize: expectedSize, buffer: newBuffer)
+        } else {
+            finishReceivingFrame(newBuffer, from: connection)
         }
     }
 
     private func finishReceivingFrame(_ frame: Data, from connection: any TransportConnection) {
         scheduleInactivityTimeout(for: connection)
         onFrame?(frame)
-        readSize(from: connection)
+        receive(from: connection)
     }
 
     private func scheduleInactivityTimeout(for connection: any TransportConnection) {
         let identifier = ObjectIdentifier(connection)
-        let workItem = DispatchWorkItem {
-            Task { [weak self] in
-                guard let self else { return }
-                
+        let workItem = DispatchWorkItem(flags: .enforceQoS) { [weak self] in
+            guard let self else { return }
+            
+            Task {
                 let connection = await self.connection(matching: identifier)
                 guard let connection else { return }
                 

@@ -125,13 +125,17 @@ public actor FrameStreamClient {
         connection = nil
     }
 
-    public func send(_ data: Data) {
+    public func send(_ data: Data) async {
+        guard let connection else {
+            return
+        }
+
         let packet = FramePacket.packetized(data)
-        connection?.send(content: packet, completion: { error in
-            guard let error else { return }
+        do {
+            try await connection.send(content: packet)
+        } catch {
             debugPrint("❌ Error: \(error.localizedDescription)")
-            _ = error.errorCode == 57 || error.errorCode == 54
-        })
+        }
     }
 
     private func handleStateUpdate(_ newState: TransportConnectionState, sourceID: ObjectIdentifier) {
@@ -143,11 +147,12 @@ public actor FrameStreamClient {
         case .setup, .preparing:
             status = .connecting
         case .waiting(let error):
-            debugPrint("!!! Connection waiting: \(error)")
+            debugPrint("❌ Connection waiting error: \(error)")
             status = .failed
         case .ready:
             status = .connected
-        case .failed:
+        case .failed(let error):
+            debugPrint("❌ Failed error: \(error)")
             status = .failed
         case .cancelled:
             status = .idle

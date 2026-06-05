@@ -134,20 +134,15 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
         forceCancelCallCount += 1
     }
 
-    func send(content: Data?, completion: @escaping TransportSendCompletion) {
+    func send(content: Data?) async throws {
         if let content {
             sentPayloads.append(content)
         }
-        completion(nil)
     }
 
-    func receive(
-        minimumIncompleteLength: Int,
-        maximumLength: Int,
-        completion: @escaping TransportReceiveCompletion
-    ) {
+    func receive(minimumIncompleteLength: Int, maximumLength: Int) async throws -> TransportReceiveResult {
         Issue.record("FrameStreamClient tests should not receive data.")
-        completion(nil, nil, true, nil)
+        return TransportReceiveResult(data: Data(), contentContext: nil, isComplete: true)
     }
 
     func simulateState(_ newState: TransportConnectionState) {

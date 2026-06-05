@@ -134,11 +134,11 @@ private final class MockTransportListener: @unchecked Sendable, TransportListene
     }
 }
 
-private final class MockTransportConnection: @unchecked Sendable, TransportConnection {
-    enum ReceiveResult {
-        case success(Data)
-        case failure
-    }
+    private final class MockTransportConnection: @unchecked Sendable, TransportConnection {
+        enum ReceiveResult {
+            case success(Data)
+            case failure(any Error)
+        }
 
     var state: TransportConnectionState = .setup
     var stateUpdateHandler: (@Sendable (TransportConnectionState) -> Void)?
@@ -168,29 +168,23 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
         forceCancelCallCount += 1
     }
 
-    func send(content: Data?, completion: @escaping TransportSendCompletion) {
+    func send(content: Data?) async throws {
         if let content {
             sentPayloads.append(content)
         }
-        completion(nil)
     }
 
-    func receive(
-        minimumIncompleteLength: Int,
-        maximumLength: Int,
-        completion: @escaping TransportReceiveCompletion
-    ) {
+    func receive(minimumIncompleteLength: Int, maximumLength: Int) async throws -> TransportReceiveResult {
         guard receiveResults.isEmpty == false else {
-            completion(nil, nil, true, nil)
-            return
+            return TransportReceiveResult(data: Data(), contentContext: nil, isComplete: true)
         }
 
         let next = receiveResults.removeFirst()
         switch next {
         case .success(let data):
-            completion(data, nil, false, nil)
-        case .failure:
-            completion(nil, nil, true, nil)
+            return TransportReceiveResult(data: data, contentContext: nil, isComplete: false)
+        case .failure(let error):
+            throw error
         }
     }
 
