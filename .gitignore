@@ -41,4 +41,6 @@ FrontCameraContinuation/FrontCameraContinuation.xcodeproj/project.xcworkspace/
 .agents
 
 H264/.build
+Transport/.build
+
 

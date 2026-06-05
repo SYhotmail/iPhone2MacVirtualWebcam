@@ -9,12 +9,12 @@ import Foundation
 import Combine
 import CoreMedia
 import H264
-import Network
 import Synchronization
+import Transport
 
 nonisolated
 final class ServerManager: @unchecked Sendable {
-    private let server = TCPServer()
+    private let streamServer = FrameStreamServer()
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
     private var decodedFrameCancellable: AnyCancellable?
@@ -48,19 +48,19 @@ final class ServerManager: @unchecked Sendable {
     }
     
     var listenerStatusPublisher: AnyPublisher<String, Never> {
-        server.listenerState
+        streamServer.state.listenerState
             .map(\.debugDescription)
             .onMainAnyPublisher()
     }
     
     var connectionStateLastPublisher: AnyPublisher<String, Never> {
-        server.connectionStates
+        streamServer.state.connectionState
             .map(\.debugDescription)
             .onMainAnyPublisher()
     }
     
     var connectedPublisher: AnyPublisher<Bool, Never> {
-        server.listenerState.combineLatest(server.connectionStates)
+        streamServer.state.listenerState.combineLatest(streamServer.state.connectionState)
             .map { $0 == .ready && $1 == .ready }
             .removeDuplicates()
             .onMainAnyPublisher()
@@ -72,12 +72,18 @@ final class ServerManager: @unchecked Sendable {
                 self?.sinkClient.enqueue(sampleBuffer)
             }
 
-        server.onFrame = { [weak self] data in
-            self?.decoder.scheduleToDecode(data)
-        }
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
 
-        server.onStreamUnavailable = { [weak self] in
-            self?.decoder.scheduleToReset()
+            await streamServer.setFrameHandler { [weak self] data in
+                self?.decoder.scheduleToDecode(data)
+            }
+
+            await streamServer.setStreamUnavailableHandler { [weak self] in
+                self?.decoder.scheduleToReset()
+            }
         }
     }
     
@@ -86,7 +92,9 @@ final class ServerManager: @unchecked Sendable {
             bindCore(port: port)
         }
         sinkClient.start()
-        try? server.start(port: port)
+        Task {
+            try? await streamServer.start(on: port)
+        }
     }
     
     private func resetDecoder() {
@@ -100,13 +108,17 @@ final class ServerManager: @unchecked Sendable {
         
         sinkClient.stop()
         resetDecoder()
-        server.stop()
+        Task {
+            await streamServer.stop()
+        }
     }
     
     private func unbindCore() {
-        server.onFrame = nil
-        server.onStreamUnavailable = nil
         decodedFrameCancellable = nil
+        Task {
+            await streamServer.setFrameHandler(nil)
+            await streamServer.setStreamUnavailableHandler(nil)
+        }
     }
 }
 

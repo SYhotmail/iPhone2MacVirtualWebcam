@@ -10,13 +10,14 @@
 import UIKit
 import Combine
 import H264
+import Transport
 
 nonisolated
 final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOutputSampleBufferDelegate {
-    typealias ConnectionStatus = ConnectionManager.Status
+    typealias ConnectionStatus = FrameStreamClient.Status
 
     private let captureSessionManager = CaptureSessionManager()
-    private let connectionManager = ConnectionManager()
+    private let streamClient = FrameStreamClient()
     private var encoder: H264Encoder!
     private let reconnectQueue = DispatchQueue(label: "camera.streamer.reconnect", qos: .utility)
     private var reconnectWorkItem: DispatchWorkItem? {
@@ -57,13 +58,19 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
     
     private func bindConnectionManager() {
-        connectionManager.onConnectionChaged = { [weak self] isConnected in
-            self?.isConnectedPublisher.value = isConnected
-        }
-        connectionManager.onConnectionStatusChanged = { [weak self] status in
-            self?.connectionStatusPublisher.value = status
-            if status == .failed {
-                self?.handleConnectionFailure()
+        Task { [weak self] in
+            guard let self else {
+                return
+            }
+
+            await streamClient.setConnectivityChangedHandler { [weak self] isConnected in
+                self?.isConnectedPublisher.value = isConnected
+            }
+            await streamClient.setStatusChangedHandler { [weak self] status in
+                self?.connectionStatusPublisher.value = status
+                if status == .failed {
+                    self?.handleConnectionFailure()
+                }
             }
         }
     }
@@ -96,9 +103,13 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         isStreamingRequestedPublisher.value = true
         cancelPendingReconnect()
 
-        let connected = connectionManager.connect(host: host, port: port)
-        assert(connected)
-        return preparePreview(position: position, preset: preset) && connected
+        let canConnect = FrameStreamClient.accepts(port: port)
+        if canConnect {
+            Task {
+                _ = await streamClient.connect(toHost: host, port: port)
+            }
+        }
+        return preparePreview(position: position, preset: preset) && canConnect
     }
     
     private func encoderInvalidate() {
@@ -113,7 +124,9 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
 
     private func send(_ data: Data) {
-        connectionManager.send(data)
+        Task {
+            await streamClient.send(data)
+        }
     }
 
     private func handleSessionInterrupted(_ reason: AVCaptureSession.InterruptionReason?) {
@@ -138,26 +151,36 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         
         stopStreaming()
     }
+    
+    private func scheduleToReconnect() {
+        Task {
+            _ = await streamClient.reconnect()
+        }
+    }
 
     private func restartStreamingAfterCaptureRecovery() {
         guard shouldAutoResume else { return }
 
         cancelPendingReconnect()
         encoderInvalidate()
-        _ = connectionManager.reconnectCurrent()
+        scheduleToReconnect()
 
         try? captureSessionManager.reconfigureCurrent(delegate: self)
     }
     
     private func disconnect() {
         encoderInvalidate()
-        connectionManager.disconnect()
+        Task {
+            await streamClient.disconnect()
+        }
     }
 
     private func handleConnectionFailure() {
         guard shouldAutoResume else { return }
         encoderInvalidate()
-        connectionManager.disconnectPreservingStatus()
+        Task {
+            await streamClient.disconnectPreservingStatus()
+        }
         scheduleReconnect()
     }
 
@@ -169,7 +192,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
                 return
             }
 
-            _ = self.connectionManager.reconnectCurrent()
+            scheduleToReconnect()
         }
         reconnectWorkItem = workItem
         reconnectQueue.asyncAfter(deadline: .now() + 1.5, execute: workItem)

@@ -2,6 +2,7 @@ import SwiftUI
 import AVFoundation
 import Combine
 import UIKit
+import Transport
 
 @Observable
 final class ContentViewModel {
@@ -292,6 +293,9 @@ final class ContentViewModel {
         case .failed:
             isStreaming = false
             streamStatus = isStreamingRequested ? .waitingForReceiver : .attentionNeeded
+        @unknown default:
+            isStreaming = false
+            streamStatus = .attentionNeeded
         }
     }
 }
