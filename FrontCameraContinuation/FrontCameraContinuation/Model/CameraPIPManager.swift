@@ -42,6 +42,7 @@ final class CameraPIPManager: NSObject {
     }
 
     func attach(sourceView: VideoView?, frameProvider: any PreviewDecodedFrameProvidable) {
+        loadViewIfNeeded()
         bind(frameProvider: frameProvider)
 
         guard self.sourceView !== sourceView else {
@@ -73,6 +74,7 @@ final class CameraPIPManager: NSObject {
             return
         }
 
+        flushRenderer()
         shouldStartWhenPossible = true
         updateAudioSession(isActive: true)
         startPictureInPictureWhenPossible(remainingAttempts: Constants.startRetries)
@@ -82,9 +84,21 @@ final class CameraPIPManager: NSObject {
         shouldStartWhenPossible = false
         updateAudioSession(isActive: false)
         pipController?.stopPictureInPicture()
+        flushRenderer()
+    }
+
+    func resetVideoContent() {
+        flushRenderer()
+    }
+    
+    private func loadViewIfNeeded() {
+        contentViewController.loadViewIfNeeded()
     }
 
     private func bind(frameProvider: any PreviewDecodedFrameProvidable) {
+        loadViewIfNeeded()
+        flushRenderer()
+
         guard let sampleBufferRenderer = contentViewController.sampleBufferRenderer else {
             unbind()
             return
@@ -215,6 +229,10 @@ final class CameraPIPManager: NSObject {
             debugPrint("Failed to configure audio session for PiP: \(error)")
         }
     }
+
+    private func flushRenderer() {
+        contentViewController.flushRenderer()
+    }
 }
 
 @MainActor
@@ -243,6 +261,10 @@ private final class VideoCallPictureInPictureContentViewController: AVPictureInP
     
     var sampleBufferRenderer: AVSampleBufferVideoRenderer? {
         videoView.sampleBufferRenderer
+    }
+    
+    func flushRenderer() {
+        sampleBufferRenderer?.flush()
     }
     
     func enqueue(sampleBuffer: CMSampleBuffer) {

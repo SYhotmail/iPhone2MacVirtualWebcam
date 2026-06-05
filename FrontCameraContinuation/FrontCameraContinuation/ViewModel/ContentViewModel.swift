@@ -207,11 +207,16 @@ final class ContentViewModel {
             startStreaming()
         }
     }
+    
+    private func resetVideoContent() {
+        pipController.resetVideoContent()
+    }
 
     func startStreaming() {
         let trimmedHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
         let portValue = UInt16(port) ?? Constants.defaultPort
 
+        resetVideoContent()
         isStreamingRequested = true
         streamStatus = .connecting
         let didStart = cameraStreamer.startStreaming(
@@ -229,6 +234,7 @@ final class ContentViewModel {
     }
 
     func stopStreaming() {
+        resetVideoContent()
         cameraStreamer.stopStreaming()
         isStreamingRequested = false
         isStreaming = false

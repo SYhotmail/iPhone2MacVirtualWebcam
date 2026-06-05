@@ -128,6 +128,24 @@ xcodebuild \
   build
 ```
 
+To build the `Release` iPhone app for a connected physical iPhone, install it on that same device, and launch it:
+
+```bash
+/bin/zsh scripts/deploy_ios_release_to_iphone.sh
+```
+
+If more than one iPhone is connected or discoverable, pass a device name or UDID explicitly:
+
+```bash
+/bin/zsh scripts/deploy_ios_release_to_iphone.sh 'My iPhone'
+```
+
+Useful environment overrides:
+
+- `LAUNCH_AFTER_INSTALL=0` to skip auto-launch after install
+- `ALLOW_PROVISIONING_UPDATES=1` if Xcode needs to refresh automatic signing assets
+- `DERIVED_DATA_PATH=/custom/path` to change where the Release build output is stored
+
 When first launched on iPhone, allow camera access.
 
 ## How to Use

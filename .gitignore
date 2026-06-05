@@ -8,6 +8,7 @@
 *.xcodeproj/xcuserdata/
 DerivedData/
 build/
+.build
 Build/
 
 // SwiftPM
