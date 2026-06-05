@@ -243,21 +243,21 @@ final class ContentViewModel {
 
     private func bind() {
         cameraStreamer.isConnectedPublisher
-            .receive(on: DispatchQueue.main)
+            .onMainAnyPublisher()
             .sink { [weak self] isConnected in
                 self?.isStreaming = isConnected
             }
             .store(in: &cancellables)
 
         cameraStreamer.connectionStatusPublisher
-            .receive(on: DispatchQueue.main)
+            .onMainAnyPublisher()
             .sink { [weak self] status in
                 self?.applyConnectionStatus(status)
             }
             .store(in: &cancellables)
 
         cameraStreamer.isStreamingRequestedPublisher
-            .receive(on: DispatchQueue.main)
+            .onMainAnyPublisher()
             .sink { [weak self] isRequested in
                 self?.isStreamingRequested = isRequested
             }
