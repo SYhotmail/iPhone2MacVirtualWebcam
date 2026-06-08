@@ -151,11 +151,7 @@ public actor H264Decoder {
                     formatDescriptionOut: &formatDescription
                 )
 
-                guard let formatDescription = Self.valueOnStatusSuccess(formatDescription, status: status) else {
-                    return nil
-                }
-
-                return formatDescription
+                return Self.valueOnStatusSuccess(formatDescription, status: status)
             }
         }
 
@@ -347,7 +343,7 @@ public actor H264Decoder {
         )
     }
 
-    private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus) -> T! {
+    static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus) -> T! {
         guard status == noErr else {
             return nil
         }
@@ -355,7 +351,7 @@ public actor H264Decoder {
         return value
     }
 
-    private static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus?) -> T! {
+    static func valueOnStatusSuccess<T>(_ value: T?, status: OSStatus?) -> T! {
         status.flatMap { valueOnStatusSuccess(value, status: $0) }
     }
 

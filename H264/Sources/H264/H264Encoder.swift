@@ -70,8 +70,7 @@ public actor H264Encoder {
             frameProperties: frameProperties.flatMap { $0 as CFDictionary },
             infoFlagsOut: nil
         ) { status, _, sampleBuffer in
-            guard status == noErr,
-                  let sampleBuffer,
+            guard let sampleBuffer = H264Decoder.valueOnStatusSuccess(sampleBuffer, status: status),
                   CMSampleBufferDataIsReady(sampleBuffer),
                   let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
                 return
@@ -162,8 +161,8 @@ public actor H264Encoder {
             compressionSessionOut: &compressionSession
         )
 
-        guard res == noErr, let compressionSession else {
-            return compressionSession
+        guard let compressionSession = H264Decoder.valueOnStatusSuccess(compressionSession, status: res) else {
+            return nil
         }
 
         VTSessionSetProperty(
@@ -268,7 +267,7 @@ public actor H264Encoder {
             parameterSetCountOut: &spsCount,
             nalUnitHeaderLengthOut: nil
         )
-        guard let spsPointer, res == noErr else {
+        guard let spsPointer = H264Decoder.valueOnStatusSuccess(spsPointer, status: res) else {
             return false
         }
         appendAnnexBPacket(bytes: spsPointer, count: spsSize, to: &packet)
@@ -285,7 +284,7 @@ public actor H264Encoder {
             parameterSetCountOut: &ppsCount,
             nalUnitHeaderLengthOut: nil
         )
-        guard let ppsPointer, res == noErr else {
+        guard let ppsPointer = H264Decoder.valueOnStatusSuccess(ppsPointer, status: res) else {
             return false
         }
         appendAnnexBPacket(bytes: ppsPointer, count: ppsSize, to: &packet)
@@ -309,7 +308,7 @@ public actor H264Encoder {
             dataPointerOut: &dataPointer
         )
 
-        guard let dataPointer, res == noErr else {
+        guard let dataPointer = H264Decoder.valueOnStatusSuccess(dataPointer, status: res) else {
             return false
         }
 
