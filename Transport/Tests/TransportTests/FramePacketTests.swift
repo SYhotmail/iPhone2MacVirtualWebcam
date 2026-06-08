@@ -13,5 +13,6 @@ struct FramePacketTests {
         #expect(packet.count == 8)
         #expect(packet.prefix(4) == Data([0x00, 0x00, 0x00, 0x04]))
         #expect(packet.dropFirst(4) == payload)
+        #expect(FramePacket.payloadSize(for: Data(packet.prefix(4))) == payload.count)
     }
 }

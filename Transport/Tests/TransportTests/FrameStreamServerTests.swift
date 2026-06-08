@@ -51,6 +51,28 @@ struct FrameStreamServerTests {
     }
 
     @Test
+    func requestsEntireFramePayloadInSingleReceive() async throws {
+        let listener = MockTransportListener()
+        let connection = MockTransportConnection(
+            receiveResults: [
+                .success(Data([0x00, 0x00, 0x00, 0x03])),
+                .success(Data([0xAA, 0xBB, 0xCC])),
+            ]
+        )
+        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { connection.receiveRequests.count == 2 }
+
+        #expect(connection.receiveRequests.count == 2)
+        #expect(connection.receiveRequests[0] == .init(minimumIncompleteLength: 4, maximumLength: 4))
+        #expect(connection.receiveRequests[1] == .init(minimumIncompleteLength: 3, maximumLength: 3))
+    }
+
+    @Test
     func cancelConnectionsForceCancelsActiveConnections() async throws {
         let listener = MockTransportListener()
         let connection = MockTransportConnection(receiveResults: [])
@@ -134,11 +156,11 @@ private final class MockTransportListener: @unchecked Sendable, TransportListene
     }
 }
 
-    private final class MockTransportConnection: @unchecked Sendable, TransportConnection {
-        enum ReceiveResult {
-            case success(Data)
-            case failure(any Error)
-        }
+private final class MockTransportConnection: @unchecked Sendable, TransportConnection {
+    struct ReceiveRequest: Equatable {
+        let minimumIncompleteLength: Int
+        let maximumLength: Int
+    }
 
     var state: TransportConnectionState = .setup
     var stateUpdateHandler: (@Sendable (TransportConnectionState) -> Void)?
@@ -150,9 +172,10 @@ private final class MockTransportListener: @unchecked Sendable, TransportListene
     private(set) var cancelCallCount = 0
     private(set) var forceCancelCallCount = 0
     private(set) var sentPayloads = [Data]()
-    private var receiveResults: [ReceiveResult]
+    private(set) var receiveRequests = [ReceiveRequest]()
+    private var receiveResults: [Result<Data, Error>]
 
-    init(receiveResults: [ReceiveResult]) {
+    init(receiveResults: [Result<Data, Error>]) {
         self.receiveResults = receiveResults
     }
 
@@ -175,6 +198,8 @@ private final class MockTransportListener: @unchecked Sendable, TransportListene
     }
 
     func receive(minimumIncompleteLength: Int, maximumLength: Int) async throws -> TransportReceiveResult {
+        receiveRequests.append(.init(minimumIncompleteLength: minimumIncompleteLength,
+                                     maximumLength: maximumLength))
         guard receiveResults.isEmpty == false else {
             return TransportReceiveResult(data: Data(), contentContext: nil, isComplete: true)
         }

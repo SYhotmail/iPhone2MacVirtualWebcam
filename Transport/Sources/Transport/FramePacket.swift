@@ -3,8 +3,8 @@ import Foundation
 enum FramePacket {
     static let headerByteCount = 4
     
-    static func packetSize(for chunk: Data) -> Int {
-        let res = chunk.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
+    static func payloadSize(for header: Data) -> Int {
+        let res = header.withUnsafeBytes { $0.load(as: UInt32.self).bigEndian }
         return Int(res)
     }
 

@@ -163,23 +163,23 @@ public actor FrameStreamServer {
             return
         }
 
-        let chunk = result.data
-        guard chunk.count == headerByteCount else {
-            debugPrint("❌ Failed to read size: invalid header length \(chunk.count)")
+        let header = result.data
+        guard header.count == headerByteCount else {
+            debugPrint("❌ Failed to read size: invalid header length \(header.count)")
             cancelAndClose(connection)
             return
         }
 
-        let expectedSize = FramePacket.packetSize(for: chunk)
-        await readFrame(from: connection, expectedSize: Int(expectedSize), buffer: Data())
+        let expectedSize = FramePacket.payloadSize(for: header)
+        await readFrame(from: connection, expectedSize: expectedSize)
     }
 
-    private func readFrame(from connection: any TransportConnection, expectedSize: Int, buffer: Data) async {
+    private func readFrame(from connection: any TransportConnection, expectedSize: Int) async {
         let result: TransportReceiveResult
         do {
             result = try await connection.receive(
-                minimumIncompleteLength: 1,
-                maximumLength: expectedSize - buffer.count
+                minimumIncompleteLength: expectedSize,
+                maximumLength: expectedSize
             )
         } catch {
             debugPrint("❌ Failed to read frame:", error)
@@ -187,21 +187,14 @@ public actor FrameStreamServer {
             return
         }
 
-        let chunk = result.data
-        guard !chunk.isEmpty else {
-            debugPrint("❌ Failed to read frame: empty payload")
+        let frame = result.data
+        guard frame.count == expectedSize else {
+            debugPrint("❌ Failed to read frame: expected \(expectedSize) bytes, got \(frame.count)")
             cancelAndClose(connection)
             return
         }
 
-        var newBuffer = buffer
-        newBuffer.append(chunk)
-
-        if newBuffer.count < expectedSize {
-            await readFrame(from: connection, expectedSize: expectedSize, buffer: newBuffer)
-        } else {
-            finishReceivingFrame(newBuffer, from: connection)
-        }
+        finishReceivingFrame(frame, from: connection)
     }
 
     private func finishReceivingFrame(_ frame: Data, from connection: any TransportConnection) {

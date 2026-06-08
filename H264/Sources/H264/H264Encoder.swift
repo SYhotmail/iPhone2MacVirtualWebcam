@@ -211,16 +211,21 @@ public actor H264Encoder {
     }
 
     @_spi(Testing) public static func targetBitRate(size: CGSize) -> Int {
+        let million = 1_000_000
+        return bitRateScale(size: size) * million
+    }
+    
+    private static func bitRateScale(size: CGSize) -> Int {
         let pixels = Int(size.width * size.height)
         switch pixels {
         case 0..<(640 * 480):
-            return 1_000_000
+            return 1
         case 0..<(1280 * 720):
-            return 2_000_000
+            return 2
         case 0..<(1920 * 1080):
-            return 4_000_000
+            return 4
         default:
-            return 6_000_000
+            return 6
         }
     }
 

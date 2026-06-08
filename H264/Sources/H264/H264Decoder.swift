@@ -106,12 +106,12 @@ public actor H264Decoder {
             return
         }
         streamDiagnostics.mark(.decodeRequested)
-        let nalUnits = Self.splitAnnexBNALUnits(in: data)
-        guard !nalUnits.isEmpty else {
+        let accessUnitNALUnits = Self.splitAnnexBNALUnits(in: data)
+        guard !accessUnitNALUnits.isEmpty else {
             return
         }
         streamDiagnostics.mark(.decodeSubmitted)
-        decodeAccessUnit(nalUnits)
+        decodeAccessUnit(accessUnitNALUnits)
     }
 
     private func decodeAccessUnit(_ nalUnits: [Data]) {
@@ -447,15 +447,6 @@ public actor H264Decoder {
         }
 
         return nalUnits
-    }
-
-    private static func isPriorityNALUnit(_ data: Data) -> Bool {
-        guard data.count > 4 else {
-            return false
-        }
-
-        let nalType = data[4] & 0x1F
-        return nalType == 7 || nalType == 8 || nalType == 5
     }
 
     private func handleDecodedFrame(_ sampleBuffer: sending SendableSampleBuffer) {
