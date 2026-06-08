@@ -4,60 +4,6 @@ import Synchronization
 @preconcurrency import Combine
 import VideoToolbox
 
-nonisolated
-final class StreamDiagnostics: @unchecked Sendable {
-    static let shared = StreamDiagnostics()
-
-    enum Counter: String, CaseIterable {
-        case tcpReceived = "tcp.received"
-        case decodeRequested = "decode.requested"
-        case decodeDropped = "decode.dropped"
-        case decodeSubmitted = "decode.submitted"
-        case decodeOutput = "decode.output"
-        case decodeError = "decode.error"
-        case previewEnqueued = "preview.enqueued"
-        case previewDropped = "preview.dropped"
-    }
-
-    private let lock = Mutex(())
-    private var counts = [Counter: Int]()
-    private var lastFlush = Date()
-
-    private init() {}
-
-    private func markCore(_ counter: Counter, amount: Int) {
-        counts[counter, default: 0] += amount
-
-        let now = Date()
-        let elapsed = now.timeIntervalSince(lastFlush)
-        guard elapsed >= 1 else {
-            return
-        }
-
-        let snapshot = Counter.allCases.compactMap { counter -> String? in
-            guard let count = counts[counter], count > 0 else {
-                return nil
-            }
-            return "\(counter.rawValue)=\(count)/s"
-        }
-
-        counts.removeAll(keepingCapacity: true)
-        lastFlush = now
-
-        guard !snapshot.isEmpty else {
-            return
-        }
-
-        debugPrint("STREAM STATS", snapshot.joined(separator: " "))
-    }
-
-    func mark(_ counter: Counter, amount: Int = 1) {
-        lock.withLock { _ in
-            self.markCore(counter, amount: amount)
-        }
-    }
-}
-
 public actor H264Decoder {
     public struct SendableSampleBuffer: @unchecked Sendable {
         public let value: CMSampleBuffer
@@ -66,6 +12,9 @@ public actor H264Decoder {
             self.value = value
         }
     }
+
+    private static let annexBStartCodeLength = H264Encoder.annexBStartCode.count
+    private static let avccNALUnitLengthFieldSize = 4
 
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
@@ -102,7 +51,7 @@ public actor H264Decoder {
 
     private func decode(_ data: Data) {
         streamDiagnostics.mark(.tcpReceived)
-        guard data.count > 4 else {
+        guard data.count > Self.annexBStartCodeLength else {
             return
         }
         streamDiagnostics.mark(.decodeRequested)
@@ -119,32 +68,29 @@ public actor H264Decoder {
         frameNALUnits.reserveCapacity(nalUnits.count)
 
         for nalUnit in nalUnits {
-            guard nalUnit.count > 4 else {
+            guard nalUnit.count > Self.annexBStartCodeLength else {
                 continue
             }
-            let nalType = nalUnit[4] & 0x1F
+            let nalType = nalUnit[Self.annexBStartCodeLength] & 0x1F
 
             switch nalType {
             case 7:
-                let newSPS = nalUnit.advanced(by: 4)
+                let newSPS = nalUnit.advanced(by: Self.annexBStartCodeLength)
                 if sps != newSPS {
                     resetDecoder()
+                    sps = newSPS
                     pps = nil
                 }
-                sps = newSPS
                 createSessionFormatDescriptionOnNeed()
-
             case 8:
-                let newPPS = nalUnit.advanced(by: 4)
+                let newPPS = nalUnit.advanced(by: Self.annexBStartCodeLength)
                 if pps != newPPS {
                     resetDecoder()
+                    pps = newPPS
                 }
-                pps = newPPS
                 createSessionFormatDescriptionOnNeed()
-
             case 9:
                 continue
-
             default:
                 frameNALUnits.append(nalUnit)
             }
@@ -183,8 +129,8 @@ public actor H264Decoder {
             return
         }
 
-        let formatDescription: CMFormatDescription? = sps.withUnsafeBytes { spsPtr in
-            pps.withUnsafeBytes { ppsPtr in
+        let formatDescription: CMFormatDescription? = sps.withUnsafeBytes { (spsPtr: UnsafeRawBufferPointer) -> CMFormatDescription? in
+            pps.withUnsafeBytes { (ppsPtr: UnsafeRawBufferPointer) -> CMFormatDescription? in
                 let ptrs = [spsPtr, ppsPtr]
                 let parameterSetPointers = ptrs.map { $0.bindMemory(to: UInt8.self).baseAddress }.compactMap { $0 }
 
@@ -201,7 +147,7 @@ public actor H264Decoder {
                     parameterSetCount: 2,
                     parameterSetPointers: parameterSetPointers,
                     parameterSetSizes: parameterSetSizes,
-                    nalUnitHeaderLength: 4,
+                    nalUnitHeaderLength: Int32(Self.avccNALUnitLengthFieldSize),
                     formatDescriptionOut: &formatDescription
                 )
 
@@ -242,12 +188,12 @@ public actor H264Decoder {
         assert(!Thread.isMainThread)
         var buffer = Data()
         for nalUnit in nalUnits {
-            guard nalUnit.count > 4 else {
+            guard nalUnit.count > Self.annexBStartCodeLength else {
                 continue
             }
-            var length = UInt32(nalUnit.count - 4).bigEndian
-            buffer.append(Data(bytes: &length, count: 4))
-            buffer.append(nalUnit.advanced(by: 4))
+            var length = UInt32(nalUnit.count - Self.annexBStartCodeLength).bigEndian
+            buffer.append(Data(bytes: &length, count: Self.avccNALUnitLengthFieldSize))
+            buffer.append(nalUnit.advanced(by: Self.annexBStartCodeLength))
         }
 
         guard !buffer.isEmpty else {
@@ -415,16 +361,16 @@ public actor H264Decoder {
 
     @_spi(Testing) public static func splitAnnexBNALUnits(in data: Data) -> [Data] {
         let bytes = [UInt8](data)
-        guard bytes.count >= 5 else {
+        guard bytes.count > annexBStartCodeLength else {
             return []
         }
 
         var startOffsets = [Int]()
         var index = 0
-        while index <= bytes.count - 4 {
-            if bytes[index] == 0, bytes[index + 1] == 0, bytes[index + 2] == 0, bytes[index + 3] == 1 {
+        while index <= bytes.count - annexBStartCodeLength {
+            if bytes[index..<index + annexBStartCodeLength] == H264Encoder.annexBStartCode[0..<annexBStartCodeLength] {
                 startOffsets.append(index)
-                index += 4
+                index += annexBStartCodeLength
             } else {
                 index += 1
             }
@@ -439,7 +385,7 @@ public actor H264Decoder {
 
         for (offsetIndex, startOffset) in startOffsets.enumerated() {
             let endOffset = offsetIndex + 1 < startOffsets.count ? startOffsets[offsetIndex + 1] : bytes.count
-            guard endOffset - startOffset > 4 else {
+            guard endOffset - startOffset > annexBStartCodeLength else {
                 continue
             }
 
@@ -454,3 +400,4 @@ public actor H264Decoder {
         decodedFramePublisher.send(sampleBuffer)
     }
 }
+

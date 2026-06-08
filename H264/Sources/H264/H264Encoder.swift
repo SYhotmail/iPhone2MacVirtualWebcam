@@ -12,7 +12,7 @@ public actor H264Encoder {
         let value: CVImageBuffer
     }
 
-    private static let annexBStartCode = [UInt8](arrayLiteral: 0, 0, 0, 1)
+    static let annexBStartCode = [UInt8](arrayLiteral: 0, 0, 0, 1)
     private let expectedFrameRate: Int
     private let maxKeyInterval: Int
 
@@ -314,14 +314,19 @@ public actor H264Encoder {
         }
 
         var offset = 0
+        var startPointer = UnsafeMutableRawPointer(dataPointer).assumingMemoryBound(to: UInt8.self)
         while offset < totalLength {
             var nalLength32: UInt32 = 0
-            memcpy(&nalLength32, dataPointer.advanced(by: offset), 4)
+            let nalCount = annexBStartCode.count
+            assert(nalCount == 4)
+            memcpy(&nalLength32, startPointer, nalCount)
             let nalLength = Int(CFSwapInt32BigToHost(nalLength32))
-            let nalStart = offset + 4
-            let nalPointer = UnsafeRawPointer(dataPointer.advanced(by: nalStart)).assumingMemoryBound(to: UInt8.self)
-            appendAnnexBPacket(bytes: nalPointer, count: nalLength, to: &packet)
-            offset += 4 + nalLength
+            startPointer += nalCount
+            offset += nalCount
+            
+            appendAnnexBPacket(bytes: startPointer, count: nalLength, to: &packet)
+            startPointer += nalLength
+            offset += nalLength
         }
 
         return true
