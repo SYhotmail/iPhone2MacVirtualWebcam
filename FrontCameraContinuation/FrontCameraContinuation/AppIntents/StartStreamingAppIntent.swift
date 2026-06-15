@@ -51,12 +51,12 @@ struct StartStreamingAppIntent: AppIntent {
     
     func perform() async throws -> some IntentResult {
         guard StreamingDestinationConfiguration() != nil else {
-            return .result(dialog: .init("Provide please host & port"))
+            return .result()
         }
 
         await coordinator.requestStartStreaming()
 
-        return .result(dialog: .init("Started Streaming"))
+        return .result()
     }
     
     @available(iOS 26.0, *)
