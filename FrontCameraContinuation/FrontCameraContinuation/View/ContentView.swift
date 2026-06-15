@@ -3,7 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
-    @State private var viewModel = ContentViewModel()
+    @Bindable var viewModel: ContentViewModel
     @FocusState private var focusedField: Field?
     @Namespace private var namespace
     let previewId = "preview"
@@ -427,5 +427,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(viewModel: ContentViewModel())
 }
