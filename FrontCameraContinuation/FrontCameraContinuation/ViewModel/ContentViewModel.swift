@@ -14,6 +14,7 @@ final class ContentViewModel {
         case attentionNeeded
     }
 
+    nonisolated
     enum Constants {
         static let hostKey = "host"
         static let portKey = "port"
@@ -77,6 +78,8 @@ final class ContentViewModel {
     private(set) var isStreamingRequested = false
     private(set) var streamStatus: StreamStatus = .idle
     
+    private let launchCoordinator: StreamingLaunchCoordinator
+    
     private(set)var isStreaming = false {
         didSet {
             guard oldValue != isStreaming else {
@@ -88,15 +91,26 @@ final class ContentViewModel {
     
     init(cameraStreamer: CameraStreamer = .init(),
          pipController: CameraPIPManager = .init(),
+         launchCoordinator: StreamingLaunchCoordinator = .shared,
          defaults: UserDefaults = .standard) {
         self.cameraStreamer = cameraStreamer
+        self.launchCoordinator = launchCoordinator
         self.defaults = defaults
         self.pipController = pipController
-        host = defaults.string(forKey: Constants.hostKey) ?? Constants.defaultHost
-        port = defaults.string(forKey: Constants.portKey) ?? Constants.defaultPortString
+        let tuple = Self.hostPortTuple(defaults: defaults)
+        host = tuple.host
+        port = tuple.port
         streamSize = defaults.object(forKey: Constants.streamSize) != nil ? StreamSize(rawValue: defaults.integer(forKey: Constants.streamSize)) ?? .hd720 : .hd720
         cameraPosition = defaults.object(forKey: Constants.cameraPosition) != nil ? CameraPosition(rawValue: defaults.integer(forKey: Constants.cameraPosition)) ?? .front : .front
         bind()
+    }
+    
+    nonisolated
+    static func hostPortTuple(defaults: UserDefaults = .standard) -> (host: String, port: String) {
+        let host = defaults.string(forKey: Constants.hostKey) ?? Constants.defaultHost
+        let port = defaults.string(forKey: Constants.portKey) ?? Constants.defaultPortString
+    
+        return (host: host, port: port)
     }
 
     let pipController: CameraPIPManager
@@ -107,7 +121,11 @@ final class ContentViewModel {
     var previewSession: AVCaptureSession {
         cameraStreamer.session
     }
-    
+
+    var pendingStartRequestID: String? {
+        launchCoordinator.pendingStartRequestID
+    }
+
     private(set)var cameraPreviewId = UInt128(0)
     
     func handleFullScreenPreviewDismiss() {
@@ -231,6 +249,30 @@ final class ContentViewModel {
             isStreaming = false
             streamStatus = .attentionNeeded
         }
+    }
+    
+    func removePendingRequest() {
+        launchCoordinator.removePendingRequest()
+    }
+
+    /// Queues a one-shot request for the foreground app to start streaming.
+    /// Starts streaming in response to a Siri or Shortcuts request using the saved destination.
+    func startStreamingFromAppIntent() {
+        guard launchCoordinator.consumePendingStartRequest() != nil, !isStreamingRequested else {
+            return
+        }
+
+        startStreaming()
+    }
+    
+    func handleScenePhase(_ newValue: ScenePhase) {
+        guard newValue == .active else {
+            if case .background = newValue {
+                removePendingRequest()
+            }
+            return
+        }
+        pipController.stopPIP()
     }
 
     func stopStreaming() {
