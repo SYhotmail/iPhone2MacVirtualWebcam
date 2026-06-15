@@ -12,12 +12,11 @@ import SwiftUI
 struct FrontCameraContinuationApp: App {
     @Environment(\.scenePhase) private var scenePhase
     @State private var viewModel = ContentViewModel()
-    @State private var launchCoordinator = StreamingLaunchCoordinator.shared
-
+    
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)
-                .task(id: launchCoordinator.pendingStartRequestID,
+                .task(id: viewModel.pendingStartRequestID,
                       viewModel.startStreamingFromAppIntent)
                 .task(id: scenePhase) {
                     guard scenePhase == .active else {

@@ -78,7 +78,6 @@ final class ContentViewModel {
     private(set) var isStreamingRequested = false
     private(set) var streamStatus: StreamStatus = .idle
     
-    @ObservationIgnored
     private let launchCoordinator: StreamingLaunchCoordinator
     
     private(set)var isStreaming = false {
