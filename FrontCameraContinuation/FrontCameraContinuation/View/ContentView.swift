@@ -69,10 +69,7 @@ struct ContentView: View {
             focusedField = nil
         }
         .onChange(of: scenePhase) { _, newValue in
-            guard newValue == .active else {
-                return
-            }
-            viewModel.pipController.stopPIP()
+            viewModel.handleScenePhase(newValue)
         }
     }
     

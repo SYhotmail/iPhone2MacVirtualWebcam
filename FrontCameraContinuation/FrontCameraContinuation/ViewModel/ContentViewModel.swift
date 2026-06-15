@@ -250,6 +250,10 @@ final class ContentViewModel {
             streamStatus = .attentionNeeded
         }
     }
+    
+    func removePendingRequest() {
+        launchCoordinator.removePendingRequest()
+    }
 
     /// Queues a one-shot request for the foreground app to start streaming.
     /// Starts streaming in response to a Siri or Shortcuts request using the saved destination.
@@ -259,6 +263,16 @@ final class ContentViewModel {
         }
 
         startStreaming()
+    }
+    
+    func handleScenePhase(_ newValue: ScenePhase) {
+        guard newValue == .active else {
+            if case .background = newValue {
+                removePendingRequest()
+            }
+            return
+        }
+        pipController.stopPIP()
     }
 
     func stopStreaming() {

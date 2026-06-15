@@ -35,9 +35,13 @@ final class StreamingLaunchCoordinator {
             return nil
         }
         
-        defaults.removeObject(forKey: Constants.pendingStartRequestIDKey)
+        removePendingRequest()
 
         return pendingStartRequestID
+    }
+    
+    func removePendingRequest() {
+        defaults.removeObject(forKey: Constants.pendingStartRequestIDKey)
     }
 }
 

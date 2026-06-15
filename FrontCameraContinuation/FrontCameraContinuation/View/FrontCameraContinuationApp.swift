@@ -22,11 +22,7 @@ struct FrontCameraContinuationApp: App {
                     guard scenePhase == .active else {
                         return
                     }
-
                     viewModel.startStreamingFromAppIntent()
-                }
-                .task {
-                    Cam2MacAppShortcuts.updateAppShortcutParameters()
                 }
         }
     }
