@@ -56,6 +56,7 @@ struct ConnectView: View {
         }
         .task {
             viewModel.refreshNetworkAddresses()
+            viewModel.checkAutoStart()
         }
         .frame(minWidth: ConnectViewLayout.minimumWindowSize.width,
                minHeight: ConnectViewLayout.minimumWindowSize.height)
@@ -166,6 +167,13 @@ struct ConnectView: View {
                     gradient: viewModel.isRunning ? palette.destructiveGradient : palette.activeGradient,
                     action: viewModel.toggleServer
                 )
+
+                Toggle(isOn: $viewModel.autoStartReceiver) {
+                    Text("Start receiver on app launch")
+                        .font(.footnote)
+                        .foregroundStyle(palette.secondaryText)
+                }
+                .toggleStyle(.checkbox)
             }
 
             Divider()
