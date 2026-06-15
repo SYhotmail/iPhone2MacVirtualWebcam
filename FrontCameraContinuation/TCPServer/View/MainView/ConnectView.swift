@@ -199,6 +199,26 @@ struct ConnectView: View {
                 }
             }
 
+            Divider()
+                .overlay(palette.panelBorder)
+
+            VStack(alignment: .leading, spacing: ConnectViewLayout.actionSpacing) {
+                Text("Background Effect")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(palette.primaryText)
+
+                Text("Use the Mac GPU to blur the background while keeping the speaker in focus for preview and the virtual camera.")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryText)
+
+                Picker("Video Effect", selection: $viewModel.videoEffect) {
+                    ForEach(VideoEffect.allCases) { effect in
+                        Text(effect.title).tag(effect)
+                    }
+                }
+                .pickerStyle(.segmented)
+            }
+
             if let text = viewModel.installerNeedsApplicationsMoveTextMessage {
                 Label(text, systemImage: "arrow.up.right.square")
                     .font(.footnote.weight(.semibold))

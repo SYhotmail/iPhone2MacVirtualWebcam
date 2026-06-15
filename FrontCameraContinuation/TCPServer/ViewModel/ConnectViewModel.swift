@@ -6,10 +6,15 @@ import Observation
 @MainActor
 @Observable
 final class ConnectViewModel {
+    enum Constants {
+        static let videoEffect = "macVideoEffect"
+    }
+
     let listenPort: UInt16
     let manager: ServerManager
     let installer: VirtualCameraInstaller
     let ipProvider: IPAddressProvidable
+    let defaults: UserDefaults
 
     private(set) var isRunning = false
     private(set) var isPreviewVisible = false
@@ -48,14 +53,30 @@ final class ConnectViewModel {
     @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
 
+    var videoEffect: VideoEffect {
+        didSet {
+            guard oldValue != videoEffect else {
+                return
+            }
+            defaults.set(videoEffect.rawValue, forKey: Constants.videoEffect)
+            manager.setVideoEffect(videoEffect)
+        }
+    }
+
     init(manager: ServerManager = ServerManager(),
          ipProvider: IPAddressProvidable = LocalNetworkAddressProvider(),
          installer: VirtualCameraInstaller = VirtualCameraInstaller(),
+         defaults: UserDefaults = .standard,
          listenPort: UInt16 = 9999) {
         self.ipProvider = ipProvider
         self.listenPort = listenPort
         self.manager = manager
         self.installer = installer
+        self.defaults = defaults
+        videoEffect = defaults.object(forKey: Constants.videoEffect) != nil
+            ? VideoEffect(rawValue: defaults.integer(forKey: Constants.videoEffect)) ?? .none
+            : .none
+        manager.setVideoEffect(videoEffect)
         bind()
     }
 

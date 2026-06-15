@@ -17,11 +17,13 @@ final class ServerManager: @unchecked Sendable {
     private let streamServer = FrameStreamServer()
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
+    private let blurProcessor = BackgroundBlurMetalRenderer()
     private var decodedFrameCancellable: AnyCancellable?
     private var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
     let decoder = H264Decoder()
     
     let lock = Mutex(())
+    private let videoEffectLock = Mutex(VideoEffect.none)
     
     
     private func setSharedFrameProvider() -> AnyPublisher<CMSampleBuffer, Never> {
@@ -32,8 +34,14 @@ final class ServerManager: @unchecked Sendable {
         let _sharedFrameProvider = decoder.publisher
             .receive(on: DispatchQueue.global(qos: .userInitiated))
             .map { $0.value }
-            .compactMap { [weak self] sampleBuffer in
-                self?.frameConverter.makeSampleBuffer(from: sampleBuffer)
+            .compactMap { [weak self] sampleBuffer -> CMSampleBuffer? in
+                guard let self else {
+                    return nil
+                }
+
+                let effect = self.videoEffectLock.withLock { $0 }
+                let inputSampleBuffer = self.blurProcessor.process(sampleBuffer, effect: effect) ?? sampleBuffer
+                return self.frameConverter.makeSampleBuffer(from: inputSampleBuffer)
             }
             .share()
             .eraseToAnyPublisher()
@@ -64,6 +72,12 @@ final class ServerManager: @unchecked Sendable {
             .map { $0 == .ready && $1 == .ready }
             .removeDuplicates()
             .onMainAnyPublisher()
+    }
+
+    func setVideoEffect(_ effect: VideoEffect) {
+        videoEffectLock.withLock { value in
+            value = effect
+        }
     }
     
     private func bindCore(port: UInt16) {
