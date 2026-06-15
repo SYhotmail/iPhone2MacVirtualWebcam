@@ -5,9 +5,10 @@
 //  Created by Siarhei Yakushevich on 30/04/2026.
 //
 
-import Foundation
+import AppKit
 import Combine
 import CoreMedia
+import Foundation
 import H264
 import Synchronization
 import Transport
@@ -78,6 +79,10 @@ final class ServerManager: @unchecked Sendable {
         videoEffectLock.withLock { value in
             value = effect
         }
+    }
+
+    func setBackgroundImage(_ image: NSImage?) {
+        blurProcessor.setBackgroundImage(image)
     }
     
     private func bindCore(port: UInt16) {

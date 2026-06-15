@@ -58,6 +58,63 @@ kernel void compositePersonMask(
     outputTexture.write(result, gid);
 }
 
+// Composite person over background image (aspect-fill the background)
+kernel void compositePersonOverBackground(
+    texture2d<float, access::sample> sourceTexture [[texture(0)]],
+    texture2d<float, access::sample> backgroundTexture [[texture(1)]],
+    texture2d<float, access::sample> maskTexture [[texture(2)]],
+    texture2d<float, access::write> outputTexture [[texture(3)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
+        return;
+    }
+
+    constexpr sampler textureSampler(address::clamp_to_edge, filter::linear);
+    const float2 outputSize = float2(outputTexture.get_width(), outputTexture.get_height());
+    const float2 uv = (float2(gid) + 0.5) / outputSize;
+
+    // Sample source (person)
+    const float4 sourceColor = sourceTexture.sample(textureSampler, uv);
+
+    // Calculate aspect-fill UV for background
+    const float2 bgSize = float2(backgroundTexture.get_width(), backgroundTexture.get_height());
+    const float outputAspect = outputSize.x / outputSize.y;
+    const float bgAspect = bgSize.x / bgSize.y;
+
+    float2 bgUV;
+    if (bgAspect > outputAspect) {
+        // Background is wider - crop sides
+        float scale = outputSize.y / bgSize.y;
+        float scaledWidth = bgSize.x * scale;
+        float offset = (scaledWidth - outputSize.x) / 2.0 / scaledWidth;
+        bgUV = float2(uv.x * (outputSize.x / scaledWidth) + offset, uv.y);
+    } else {
+        // Background is taller - crop top/bottom
+        float scale = outputSize.x / bgSize.x;
+        float scaledHeight = bgSize.y * scale;
+        float offset = (scaledHeight - outputSize.y) / 2.0 / scaledHeight;
+        bgUV = float2(uv.x, uv.y * (outputSize.y / scaledHeight) + offset);
+    }
+
+    const float4 bgColor = backgroundTexture.sample(textureSampler, bgUV);
+    const float mask = saturate(maskTexture.sample(textureSampler, uv).r);
+    const float4 result = mix(bgColor, sourceColor, mask);
+
+    outputTexture.write(result, gid);
+}
+
+// Clear BGRA texture to black
+kernel void clearBGRA(
+    texture2d<float, access::write> outputTexture [[texture(0)]],
+    uint2 gid [[thread_position_in_grid]]
+) {
+    if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
+        return;
+    }
+    outputTexture.write(float4(0.0, 0.0, 0.0, 1.0), gid);
+}
+
 struct ScaleParams {
     float2 scale;
     float2 offset;

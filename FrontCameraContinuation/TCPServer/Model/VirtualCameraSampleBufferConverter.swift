@@ -38,7 +38,8 @@ struct VirtualCameraSampleBufferConverter {
     let configuration: Configuration
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?
-    private let pipelineState: MTLComputePipelineState?
+    private let clearPipeline: MTLComputePipelineState?
+    private let scalePipeline: MTLComputePipelineState?
     private let textureCache: CVMetalTextureCache?
     private var pixelBufferPool: CVPixelBufferPool?
 
@@ -50,11 +51,18 @@ struct VirtualCameraSampleBufferConverter {
         self.commandQueue = device?.makeCommandQueue()
 
         let library = try? device?.makeDefaultLibrary(bundle: .main)
-        var pipelineState: MTLComputePipelineState?
-        if let function = library?.makeFunction(name: "scaleAndCenter") {
-            pipelineState = try? device?.makeComputePipelineState(function: function)
+
+        var clearPipeline: MTLComputePipelineState?
+        if let function = library?.makeFunction(name: "clearBGRA") {
+            clearPipeline = try? device?.makeComputePipelineState(function: function)
         }
-        self.pipelineState = pipelineState
+        self.clearPipeline = clearPipeline
+
+        var scalePipeline: MTLComputePipelineState?
+        if let function = library?.makeFunction(name: "scaleAndCenter") {
+            scalePipeline = try? device?.makeComputePipelineState(function: function)
+        }
+        self.scalePipeline = scalePipeline
 
         var textureCache: CVMetalTextureCache?
         if let device {
@@ -83,7 +91,8 @@ struct VirtualCameraSampleBufferConverter {
     private func makeVirtualCameraPixelBuffer(from imageBuffer: CVImageBuffer) -> CVPixelBuffer? {
         guard
             let commandQueue,
-            let pipelineState,
+            let clearPipeline,
+            let scalePipeline,
             let textureCache,
             let pixelBufferPool
         else {
@@ -105,7 +114,24 @@ struct VirtualCameraSampleBufferConverter {
             return nil
         }
 
-        // Calculate scale and offset for aspect-fit centering
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+
+        // Step 1: Clear output to black
+        if let clearEncoder = commandBuffer.makeComputeCommandEncoder() {
+            clearEncoder.setComputePipelineState(clearPipeline)
+            clearEncoder.setTexture(outputTexture, index: 0)
+
+            let width = clearPipeline.threadExecutionWidth
+            let height = max(1, clearPipeline.maxTotalThreadsPerThreadgroup / width)
+            let threadsPerThreadgroup = MTLSize(width: width, height: height, depth: 1)
+            let threadsPerGrid = MTLSize(width: streamWidth, height: streamHeight, depth: 1)
+            clearEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+            clearEncoder.endEncoding()
+        }
+
+        // Step 2: Scale and center the source
         let sourceWidth = Float(CVPixelBufferGetWidth(imageBuffer))
         let sourceHeight = Float(CVPixelBufferGetHeight(imageBuffer))
         let targetWidth = Float(streamWidth)
@@ -122,22 +148,19 @@ struct VirtualCameraSampleBufferConverter {
             offset: SIMD2<Float>(offsetX, offsetY)
         )
 
-        guard let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            return nil
+        if let scaleEncoder = commandBuffer.makeComputeCommandEncoder() {
+            scaleEncoder.setComputePipelineState(scalePipeline)
+            scaleEncoder.setTexture(sourceTexture, index: 0)
+            scaleEncoder.setTexture(outputTexture, index: 1)
+            scaleEncoder.setBytes(&params, length: MemoryLayout<ScaleParams>.size, index: 0)
+
+            let width = scalePipeline.threadExecutionWidth
+            let height = max(1, scalePipeline.maxTotalThreadsPerThreadgroup / width)
+            let threadsPerThreadgroup = MTLSize(width: width, height: height, depth: 1)
+            let threadsPerGrid = MTLSize(width: streamWidth, height: streamHeight, depth: 1)
+            scaleEncoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+            scaleEncoder.endEncoding()
         }
-
-        encoder.setComputePipelineState(pipelineState)
-        encoder.setTexture(sourceTexture, index: 0)
-        encoder.setTexture(outputTexture, index: 1)
-        encoder.setBytes(&params, length: MemoryLayout<ScaleParams>.size, index: 0)
-
-        let width = pipelineState.threadExecutionWidth
-        let height = max(1, pipelineState.maxTotalThreadsPerThreadgroup / width)
-        let threadsPerThreadgroup = MTLSize(width: width, height: height, depth: 1)
-        let threadsPerGrid = MTLSize(width: streamWidth, height: streamHeight, depth: 1)
-        encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
-        encoder.endEncoding()
 
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()

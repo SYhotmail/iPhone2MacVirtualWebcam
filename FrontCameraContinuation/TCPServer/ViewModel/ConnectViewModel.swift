@@ -1,13 +1,16 @@
-import Foundation
-import Combine
 import AppKit
+import Combine
+import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
 final class ConnectViewModel {
     enum Constants {
-        static let videoEffect = "macVideoEffect"
+        static let videoEffectOption = "macVideoEffectOption"
+        static let backgroundImagePath = "macBackgroundImagePath"
+        static let autoStartReceiver = "macAutoStartReceiver"
     }
 
     let listenPort: UInt16
@@ -21,6 +24,7 @@ final class ConnectViewModel {
     private(set) var listenerStatus = "Stopped"
     private(set) var connectionStatus = "Waiting for Listener"
     private(set) var networkAddresses = [String]()
+    private(set) var backgroundImage: NSImage?
     
     @ObservationIgnored
     private(set) var scheduleTask: Task<Void, Never>? {
@@ -53,13 +57,22 @@ final class ConnectViewModel {
     @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
 
-    var videoEffect: VideoEffect {
+    var autoStartReceiver: Bool {
         didSet {
-            guard oldValue != videoEffect else {
+            guard oldValue != autoStartReceiver else {
                 return
             }
-            defaults.set(videoEffect.rawValue, forKey: Constants.videoEffect)
-            manager.setVideoEffect(videoEffect)
+            defaults.set(autoStartReceiver, forKey: Constants.autoStartReceiver)
+        }
+    }
+
+    var videoEffectOption: VideoEffectOption {
+        didSet {
+            guard oldValue != videoEffectOption else {
+                return
+            }
+            defaults.set(videoEffectOption.rawValue, forKey: Constants.videoEffectOption)
+            manager.setVideoEffect(videoEffectOption.effect)
         }
     }
 
@@ -73,11 +86,46 @@ final class ConnectViewModel {
         self.manager = manager
         self.installer = installer
         self.defaults = defaults
-        videoEffect = defaults.object(forKey: Constants.videoEffect) != nil
-            ? VideoEffect(rawValue: defaults.integer(forKey: Constants.videoEffect)) ?? .none
+
+        let savedOption = defaults.object(forKey: Constants.videoEffectOption) != nil
+            ? VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption)) ?? .none
             : .none
-        manager.setVideoEffect(videoEffect)
+        self.videoEffectOption = savedOption
+        manager.setVideoEffect(savedOption.effect)
+
+        // Load saved background image
+        if let imagePath = defaults.string(forKey: Constants.backgroundImagePath),
+           let image = NSImage(contentsOfFile: imagePath) {
+            self.backgroundImage = image
+            manager.setBackgroundImage(image)
+        }
+
         bind()
+    }
+
+    func selectBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+
+        guard let image = NSImage(contentsOf: url) else {
+            return
+        }
+
+        backgroundImage = image
+        defaults.set(url.path, forKey: Constants.backgroundImagePath)
+        manager.setBackgroundImage(image)
+    }
+
+    func clearBackgroundImage() {
+        backgroundImage = nil
+        defaults.removeObject(forKey: Constants.backgroundImagePath)
+        manager.setBackgroundImage(nil)
     }
 
     var primaryAddressText: String {

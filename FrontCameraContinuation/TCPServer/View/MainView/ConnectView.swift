@@ -207,16 +207,55 @@ struct ConnectView: View {
                     .font(.headline.weight(.semibold))
                     .foregroundStyle(palette.primaryText)
 
-                Text("Use the Mac GPU to blur the background while keeping the speaker in focus for preview and the virtual camera.")
+                Text("Use the Mac GPU to blur or replace the background while keeping the speaker in focus.")
                     .font(.footnote)
                     .foregroundStyle(palette.secondaryText)
 
-                Picker("Video Effect", selection: $viewModel.videoEffect) {
-                    ForEach(VideoEffect.allCases) { effect in
-                        Text(effect.title).tag(effect)
+                Picker("Video Effect", selection: $viewModel.videoEffectOption) {
+                    ForEach(VideoEffectOption.allCases) { option in
+                        Text(option.title).tag(option)
                     }
                 }
                 .pickerStyle(.segmented)
+
+                if viewModel.videoEffectOption == .backgroundImage {
+                    HStack(spacing: ConnectViewLayout.actionSpacing) {
+                        if let image = viewModel.backgroundImage {
+                            Image(nsImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 48, height: 48)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(palette.panelBorder, lineWidth: 1)
+                                }
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Button {
+                                viewModel.selectBackgroundImage()
+                            } label: {
+                                Label(viewModel.backgroundImage == nil ? "Select Image" : "Change Image", systemImage: "photo")
+                                    .font(.footnote.weight(.semibold))
+                                    .foregroundStyle(palette.primaryText)
+                            }
+                            .buttonStyle(.plain)
+
+                            if viewModel.backgroundImage != nil {
+                                Button {
+                                    viewModel.clearBackgroundImage()
+                                } label: {
+                                    Label("Remove", systemImage: "xmark.circle")
+                                        .font(.caption.weight(.medium))
+                                        .foregroundStyle(palette.secondaryText)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .padding(.top, 4)
+                }
             }
 
             if let text = viewModel.installerNeedsApplicationsMoveTextMessage {
