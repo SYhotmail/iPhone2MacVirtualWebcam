@@ -1,5 +1,4 @@
 @preconcurrency import AVFoundation
-import CoreImage
 import Metal
 import MetalPerformanceShaders
 import Vision
@@ -8,10 +7,9 @@ nonisolated
 final class BackgroundBlurMetalRenderer {
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?
-    private let library: MTLLibrary?
-    private let pipelineState: MTLComputePipelineState?
+    private let yuvToBGRAPipeline: MTLComputePipelineState?
+    private let compositePipeline: MTLComputePipelineState?
     private let textureCache: CVMetalTextureCache?
-    private let ciContext: CIContext
     private let segmentationRequest: VNGeneratePersonSegmentationRequest
     private let segmentationHandler = VNSequenceRequestHandler()
     private let lock = NSLock()
@@ -25,13 +23,24 @@ final class BackgroundBlurMetalRenderer {
         let device = MTLCreateSystemDefaultDevice()
         self.device = device
         self.commandQueue = device?.makeCommandQueue()
-        self.library = try? device?.makeDefaultLibrary(bundle: .main)
-        if let device,
-           let library,
-           let function = library.makeFunction(name: "compositePersonMask") {
-            self.pipelineState = try? device.makeComputePipelineState(function: function)
+
+        let library = try? device?.makeDefaultLibrary(bundle: .main)
+
+        if let device, let library {
+            if let yuvFunction = library.makeFunction(name: "yuvToBGRA") {
+                self.yuvToBGRAPipeline = try? device.makeComputePipelineState(function: yuvFunction)
+            } else {
+                self.yuvToBGRAPipeline = nil
+            }
+
+            if let compositeFunction = library.makeFunction(name: "compositePersonMask") {
+                self.compositePipeline = try? device.makeComputePipelineState(function: compositeFunction)
+            } else {
+                self.compositePipeline = nil
+            }
         } else {
-            self.pipelineState = nil
+            self.yuvToBGRAPipeline = nil
+            self.compositePipeline = nil
         }
 
         var textureCache: CVMetalTextureCache?
@@ -40,12 +49,6 @@ final class BackgroundBlurMetalRenderer {
         }
         self.textureCache = textureCache
 
-        if let device {
-            self.ciContext = CIContext(mtlDevice: device, options: [.cacheIntermediates: false])
-        } else {
-            self.ciContext = CIContext(options: [.cacheIntermediates: false])
-        }
-
         let request = VNGeneratePersonSegmentationRequest()
         request.qualityLevel = .balanced
         request.outputPixelFormat = kCVPixelFormatType_OneComponent8
@@ -53,107 +56,213 @@ final class BackgroundBlurMetalRenderer {
     }
 
     func process(_ sampleBuffer: CMSampleBuffer, effect: VideoEffect) -> CMSampleBuffer? {
-        guard effect != .none else {
-            return sampleBuffer
-        }
-
         lock.lock()
-        defer {
-            lock.unlock()
-        }
+        defer { lock.unlock() }
 
         guard
             let imageBuffer = CMSampleBufferGetImageBuffer(sampleBuffer),
-            let maskBuffer = makeMaskBuffer(for: imageBuffer),
-            let sourceBuffer = makeColorBuffer(matching: imageBuffer),
-            let blurredBuffer = makeColorBuffer(matching: imageBuffer),
-            let outputBuffer = makeColorBuffer(matching: imageBuffer),
-            let sourceImage = makeSourceImage(from: imageBuffer)
-        else {
-            return nil
-        }
-
-        let extent = sourceImage.extent
-        ciContext.render(sourceImage, to: sourceBuffer, bounds: extent, colorSpace: CGColorSpaceCreateDeviceRGB())
-
-        guard
-            let sourceTexture = makeBGRA8Texture(from: sourceBuffer),
-            let blurredTexture = makeBGRA8Texture(from: blurredBuffer),
-            let outputTexture = makeBGRA8Texture(from: outputBuffer),
-            let maskTexture = makeR8Texture(from: maskBuffer),
+            let device,
             let commandQueue,
-            let commandBuffer = commandQueue.makeCommandBuffer()
+            let yuvToBGRAPipeline
         else {
-            return nil
-        }
-
-        guard let device else {
-            return nil
-        }
-
-        let blurFilter = MPSImageGaussianBlur(device: device, sigma: effect.blurSigma)
-        blurFilter.encode(commandBuffer: commandBuffer, sourceTexture: sourceTexture, destinationTexture: blurredTexture)
-
-        guard let pipelineState else {
-            return nil
-        }
-
-        guard let encoder = commandBuffer.makeComputeCommandEncoder() else {
-            return nil
-        }
-        encoder.setComputePipelineState(pipelineState)
-        encoder.setTexture(sourceTexture, index: 0)
-        encoder.setTexture(blurredTexture, index: 1)
-        encoder.setTexture(maskTexture, index: 2)
-        encoder.setTexture(outputTexture, index: 3)
-
-        let width = pipelineState.threadExecutionWidth
-        let height = max(1, pipelineState.maxTotalThreadsPerThreadgroup / width)
-        let threadsPerThreadgroup = MTLSize(width: width, height: height, depth: 1)
-        let threadsPerGrid = MTLSize(width: outputTexture.width, height: outputTexture.height, depth: 1)
-        encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
-        encoder.endEncoding()
-
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
-
-        return makeSampleBuffer(from: outputBuffer, source: sampleBuffer)
-    }
-
-    private func makeSourceImage(from imageBuffer: CVPixelBuffer) -> CIImage? {
-        let image = CIImage(cvPixelBuffer: imageBuffer)
-        return image.extent.isEmpty ? nil : image
-    }
-
-    private func makeMaskBuffer(for imageBuffer: CVPixelBuffer) -> CVPixelBuffer? {
-        try? segmentationHandler.perform([segmentationRequest], on: imageBuffer)
-        guard let observation = segmentationRequest.results?.first else {
             return nil
         }
 
         let width = CVPixelBufferGetWidth(imageBuffer)
         let height = CVPixelBufferGetHeight(imageBuffer)
-        guard let maskBuffer = makeMaskBuffer(width: width, height: height) else {
+
+        // Create source buffer for BGRA conversion
+        guard let sourceBuffer = makeColorBuffer(width: width, height: height) else {
             return nil
         }
 
-        let maskImage = CIImage(cvPixelBuffer: observation.pixelBuffer)
-            .transformed(by: CGAffineTransform(
-                scaleX: CGFloat(width) / CGFloat(CVPixelBufferGetWidth(observation.pixelBuffer)),
-                y: CGFloat(height) / CGFloat(CVPixelBufferGetHeight(observation.pixelBuffer))
-            ))
-            .clampedToExtent()
-            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: 4])
-            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let sourceTexture = makeBGRA8Texture(from: sourceBuffer) else {
+            return nil
+        }
 
-        ciContext.render(maskImage, to: maskBuffer, bounds: maskImage.extent, colorSpace: nil)
-        return maskBuffer
+        // Step 1: Convert YUV to BGRA (or copy if already BGRA)
+        guard let convertBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+
+        let pixelFormat = CVPixelBufferGetPixelFormatType(imageBuffer)
+        if pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange ||
+           pixelFormat == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange {
+            // YUV input - convert to BGRA
+            guard
+                let yTexture = makeYTexture(from: imageBuffer),
+                let uvTexture = makeUVTexture(from: imageBuffer)
+            else {
+                return nil
+            }
+
+            guard let encoder = convertBuffer.makeComputeCommandEncoder() else {
+                return nil
+            }
+            encoder.setComputePipelineState(yuvToBGRAPipeline)
+            encoder.setTexture(yTexture, index: 0)
+            encoder.setTexture(uvTexture, index: 1)
+            encoder.setTexture(sourceTexture, index: 2)
+            dispatchThreads(encoder: encoder, pipeline: yuvToBGRAPipeline, texture: sourceTexture)
+            encoder.endEncoding()
+        } else {
+            // Assume BGRA - copy directly
+            guard let inputTexture = makeBGRA8Texture(from: imageBuffer) else {
+                return nil
+            }
+            let blitEncoder = convertBuffer.makeBlitCommandEncoder()
+            blitEncoder?.copy(from: inputTexture, to: sourceTexture)
+            blitEncoder?.endEncoding()
+        }
+
+        convertBuffer.commit()
+        convertBuffer.waitUntilCompleted()
+
+        // If no effect, just return the converted BGRA buffer
+        guard effect != .none else {
+            return makeSampleBuffer(from: sourceBuffer, source: sampleBuffer)
+        }
+
+        guard let compositePipeline else {
+            return nil
+        }
+
+        // Create additional buffers for blur effect
+        guard
+            let blurredBuffer = makeColorBuffer(width: width, height: height),
+            let outputBuffer = makeColorBuffer(width: width, height: height),
+            let scaledMaskBuffer = makeScaledMaskBuffer(width: width, height: height)
+        else {
+            return nil
+        }
+
+        guard
+            let blurredTexture = makeBGRA8Texture(from: blurredBuffer),
+            let outputTexture = makeBGRA8Texture(from: outputBuffer),
+            let scaledMaskTexture = makeR8Texture(from: scaledMaskBuffer)
+        else {
+            return nil
+        }
+
+        // Step 2: Apply Gaussian blur to source for background
+        guard let blurCommandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+
+        let blurFilter = MPSImageGaussianBlur(device: device, sigma: effect.blurSigma)
+        blurFilter.encode(commandBuffer: blurCommandBuffer, sourceTexture: sourceTexture, destinationTexture: blurredTexture)
+
+        blurCommandBuffer.commit()
+        blurCommandBuffer.waitUntilCompleted()
+
+        // Step 3: Get person segmentation mask and scale it
+        guard processMask(for: imageBuffer, to: scaledMaskBuffer, device: device) else {
+            return nil
+        }
+
+        // Step 4: Composite person over blurred background
+        guard let compositeCommandBuffer = commandQueue.makeCommandBuffer() else {
+            return nil
+        }
+
+        guard let encoder = compositeCommandBuffer.makeComputeCommandEncoder() else {
+            return nil
+        }
+        encoder.setComputePipelineState(compositePipeline)
+        encoder.setTexture(sourceTexture, index: 0)
+        encoder.setTexture(blurredTexture, index: 1)
+        encoder.setTexture(scaledMaskTexture, index: 2)
+        encoder.setTexture(outputTexture, index: 3)
+        dispatchThreads(encoder: encoder, pipeline: compositePipeline, texture: outputTexture)
+        encoder.endEncoding()
+
+        compositeCommandBuffer.commit()
+        compositeCommandBuffer.waitUntilCompleted()
+
+        return makeSampleBuffer(from: outputBuffer, source: sampleBuffer)
     }
 
-    private func makeColorBuffer(matching imageBuffer: CVPixelBuffer) -> CVPixelBuffer? {
+    private func processMask(for imageBuffer: CVPixelBuffer, to scaledMaskBuffer: CVPixelBuffer, device: MTLDevice) -> Bool {
+        // Run segmentation
+        do {
+            try segmentationHandler.perform([segmentationRequest], on: imageBuffer)
+        } catch {
+            return false
+        }
+
+        guard let observation = segmentationRequest.results?.first else {
+            return false
+        }
+
+        let maskPixelBuffer = observation.pixelBuffer
+        let targetWidth = CVPixelBufferGetWidth(scaledMaskBuffer)
+        let targetHeight = CVPixelBufferGetHeight(scaledMaskBuffer)
+
+        // Create texture from mask
+        guard
+            let maskTexture = makeR8Texture(from: maskPixelBuffer),
+            let scaledMaskTexture = makeR8Texture(from: scaledMaskBuffer),
+            let commandQueue
+        else {
+            return false
+        }
+
+        // Use MPS to scale the mask with bilinear filtering
+        guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+            return false
+        }
+
+        let scaleFilter = MPSImageBilinearScale(device: device)
+        scaleFilter.encode(
+            commandBuffer: commandBuffer,
+            sourceTexture: maskTexture,
+            destinationTexture: scaledMaskTexture
+        )
+
+        // Apply slight blur to smooth mask edges
+        let maskBlur = MPSImageGaussianBlur(device: device, sigma: 4.0)
+
+        // Create temporary texture for blur output
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm,
+            width: targetWidth,
+            height: targetHeight,
+            mipmapped: false
+        )
+        descriptor.usage = [.shaderRead, .shaderWrite]
+        guard let tempTexture = device.makeTexture(descriptor: descriptor) else {
+            return false
+        }
+
+        maskBlur.encode(
+            commandBuffer: commandBuffer,
+            sourceTexture: scaledMaskTexture,
+            destinationTexture: tempTexture
+        )
+
+        // Copy back to scaled mask texture
+        let blitEncoder = commandBuffer.makeBlitCommandEncoder()
+        blitEncoder?.copy(from: tempTexture, to: scaledMaskTexture)
+        blitEncoder?.endEncoding()
+
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+
+        return true
+    }
+
+    private func dispatchThreads(encoder: MTLComputeCommandEncoder, pipeline: MTLComputePipelineState, texture: MTLTexture) {
+        let width = pipeline.threadExecutionWidth
+        let height = max(1, pipeline.maxTotalThreadsPerThreadgroup / width)
+        let threadsPerThreadgroup = MTLSize(width: width, height: height, depth: 1)
+        let threadsPerGrid = MTLSize(width: texture.width, height: texture.height, depth: 1)
+        encoder.dispatchThreads(threadsPerGrid, threadsPerThreadgroup: threadsPerThreadgroup)
+    }
+
+    private func makeColorBuffer(width: Int, height: Int) -> CVPixelBuffer? {
         let configuration = PoolConfiguration(
-            width: CVPixelBufferGetWidth(imageBuffer),
-            height: CVPixelBufferGetHeight(imageBuffer),
+            width: width,
+            height: height,
             pixelFormat: kCVPixelFormatType_32BGRA
         )
 
@@ -174,7 +283,7 @@ final class BackgroundBlurMetalRenderer {
         return pixelBuffer
     }
 
-    private func makeMaskBuffer(width: Int, height: Int) -> CVPixelBuffer? {
+    private func makeScaledMaskBuffer(width: Int, height: Int) -> CVPixelBuffer? {
         let configuration = PoolConfiguration(width: width, height: height, pixelFormat: kCVPixelFormatType_OneComponent8)
 
         if configuration != maskConfiguration {
@@ -209,6 +318,56 @@ final class BackgroundBlurMetalRenderer {
             return nil
         }
         return pool
+    }
+
+    private func makeYTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
+        guard let textureCache else {
+            return nil
+        }
+
+        var cvTexture: CVMetalTexture?
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let status = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            textureCache,
+            pixelBuffer,
+            nil,
+            .r8Unorm,
+            width,
+            height,
+            0,  // Y plane
+            &cvTexture
+        )
+        guard status == kCVReturnSuccess, let cvTexture else {
+            return nil
+        }
+        return CVMetalTextureGetTexture(cvTexture)
+    }
+
+    private func makeUVTexture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
+        guard let textureCache else {
+            return nil
+        }
+
+        var cvTexture: CVMetalTexture?
+        let width = CVPixelBufferGetWidth(pixelBuffer) / 2
+        let height = CVPixelBufferGetHeight(pixelBuffer) / 2
+        let status = CVMetalTextureCacheCreateTextureFromImage(
+            kCFAllocatorDefault,
+            textureCache,
+            pixelBuffer,
+            nil,
+            .rg8Unorm,
+            width,
+            height,
+            1,  // UV plane
+            &cvTexture
+        )
+        guard status == kCVReturnSuccess, let cvTexture else {
+            return nil
+        }
+        return CVMetalTextureGetTexture(cvTexture)
     }
 
     private func makeBGRA8Texture(from pixelBuffer: CVPixelBuffer) -> MTLTexture? {
