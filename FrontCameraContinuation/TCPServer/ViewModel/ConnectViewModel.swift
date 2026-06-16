@@ -1,21 +1,30 @@
-import Foundation
-import Combine
 import AppKit
+import Combine
+import Foundation
 import Observation
+import UniformTypeIdentifiers
 
 @MainActor
 @Observable
 final class ConnectViewModel {
+    enum Constants {
+        static let videoEffectOption = "macVideoEffectOption"
+        static let backgroundImagePath = "macBackgroundImagePath"
+        static let autoStartReceiver = "macAutoStartReceiver"
+    }
+
     let listenPort: UInt16
     let manager: ServerManager
     let installer: VirtualCameraInstaller
     let ipProvider: IPAddressProvidable
+    let defaults: UserDefaults
 
     private(set) var isRunning = false
     private(set) var isPreviewVisible = false
     private(set) var listenerStatus = "Stopped"
     private(set) var connectionStatus = "Waiting for Listener"
     private(set) var networkAddresses = [String]()
+    private(set) var backgroundImage: NSImage?
     
     @ObservationIgnored
     private(set) var scheduleTask: Task<Void, Never>? {
@@ -48,15 +57,116 @@ final class ConnectViewModel {
     @ObservationIgnored
     private var cancellables = Set<AnyCancellable>()
 
+    var autoStartReceiver: Bool {
+        didSet {
+            guard oldValue != autoStartReceiver else {
+                return
+            }
+            defaults.set(autoStartReceiver, forKey: Constants.autoStartReceiver)
+        }
+    }
+
+    var videoEffectOption: VideoEffectOption {
+        didSet {
+            guard oldValue != videoEffectOption else {
+                return
+            }
+            defaults.set(videoEffectOption.rawValue, forKey: Constants.videoEffectOption)
+            manager.setVideoEffect(videoEffectOption.effect)
+        }
+    }
+
     init(manager: ServerManager = ServerManager(),
          ipProvider: IPAddressProvidable = LocalNetworkAddressProvider(),
          installer: VirtualCameraInstaller = VirtualCameraInstaller(),
+         defaults: UserDefaults = .standard,
          listenPort: UInt16 = 9999) {
         self.ipProvider = ipProvider
         self.listenPort = listenPort
         self.manager = manager
         self.installer = installer
+        self.defaults = defaults
+
+        let savedOption = defaults.object(forKey: Constants.videoEffectOption) != nil
+            ? VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption)) ?? .none
+            : .none
+        videoEffectOption = savedOption
+        manager.setVideoEffect(savedOption.effect)
+
+        // Load auto-start setting
+        autoStartReceiver = defaults.bool(forKey: Constants.autoStartReceiver)
+
+        // Load saved background image
+        if let imagePath = defaults.string(forKey: Constants.backgroundImagePath) {
+            setBackgroundImage(at: URL(fileURLWithPath: imagePath))
+        }
+
         bind()
+    }
+    
+    @discardableResult
+    private func setBackgroundImage(at imageURL: URL?) -> Bool {
+        let image = imageURL.flatMap { NSImage(contentsOf: $0) }
+        backgroundImage = image
+        manager.setBackgroundImage(image)
+        
+        return (imageURL != nil) == (image != nil)
+    }
+
+    func checkAutoStart() {
+        if autoStartReceiver {
+            startServer()
+        }
+    }
+
+    func selectBackgroundImage() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.image]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+
+        guard panel.runModal() == .OK, let url = panel.url else {
+            return
+        }
+        
+        // Copy image to app's container to persist across restarts
+        if setBackgroundImage(at: url), let savedPath = try? saveImageToAppSupport(originalURL: url) {
+            defaults.set(savedPath.path, forKey: Constants.backgroundImagePath)
+        }
+    }
+
+    func clearBackgroundImage() {
+        // Remove saved image file
+        if setBackgroundImage(at: nil), let savedPath = defaults.string(forKey: Constants.backgroundImagePath) {
+            defaults.removeObject(forKey: Constants.backgroundImagePath)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: savedPath))
+        }
+    }
+
+    private func saveImageToAppSupport(originalURL: URL) throws -> URL? {
+        let fileManager = FileManager.default
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+
+        let appFolder = appSupport.appendingPathComponent(Bundle.main.bundleIdentifier ?? "Cam2Mac")
+
+        // Create directory if needed
+        try fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
+
+        // Use original extension or default to png
+        let fileName = originalURL.lastPathComponent
+        let destinationURL = appFolder.appendingPathComponent(fileName)
+
+        // Remove existing file
+        
+        if fileManager.isDeletableFile(atPath: destinationURL.path()) {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        
+        try fileManager.copyItem(at: originalURL, to: destinationURL)
+
+        return destinationURL
     }
 
     var primaryAddressText: String {

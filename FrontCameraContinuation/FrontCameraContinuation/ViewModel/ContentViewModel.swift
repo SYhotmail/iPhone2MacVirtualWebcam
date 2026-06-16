@@ -20,6 +20,7 @@ final class ContentViewModel {
         static let portKey = "port"
         static let streamSize = "streamSize"
         static let cameraPosition = "cameraPosition"
+        static let autoStartStreaming = "autoStartStreaming"
         static let defaultHost = "192.168.1.10"
         static let defaultPortString = "9999"
         static let defaultPort: UInt16 = 9999
@@ -64,7 +65,16 @@ final class ContentViewModel {
             preparePreview()
         }
     }
-    
+
+    var autoStartStreaming: Bool {
+        didSet {
+            guard oldValue != autoStartStreaming else {
+                return
+            }
+            defaults.set(autoStartStreaming, forKey: Constants.autoStartStreaming)
+        }
+    }
+
     var showFullScreenPreview = false
     
     private var cancellables = Set<AnyCancellable>()
@@ -102,7 +112,14 @@ final class ContentViewModel {
         port = tuple.port
         streamSize = defaults.object(forKey: Constants.streamSize) != nil ? StreamSize(rawValue: defaults.integer(forKey: Constants.streamSize)) ?? .hd720 : .hd720
         cameraPosition = defaults.object(forKey: Constants.cameraPosition) != nil ? CameraPosition(rawValue: defaults.integer(forKey: Constants.cameraPosition)) ?? .front : .front
+        autoStartStreaming = defaults.bool(forKey: Constants.autoStartStreaming)
         bind()
+    }
+
+    func checkAutoStart() {
+        if autoStartStreaming && !isStreamingRequested {
+            startStreaming()
+        }
     }
     
     nonisolated

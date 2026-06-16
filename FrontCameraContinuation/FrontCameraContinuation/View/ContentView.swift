@@ -71,6 +71,9 @@ struct ContentView: View {
         .onChange(of: scenePhase) { _, newValue in
             viewModel.handleScenePhase(newValue)
         }
+        .onAppear {
+            viewModel.checkAutoStart()
+        }
     }
     
     private func toogleFullScreenPreview() {
@@ -295,6 +298,13 @@ struct ContentView: View {
                 )
                 .shadow(color: .black.opacity(0.22), radius: 20, y: 10)
             }
+
+            Toggle(isOn: $viewModel.autoStartStreaming) {
+                Text("Start streaming on app launch")
+                    .font(.footnote)
+                    .foregroundStyle(secondaryTextColor)
+            }
+            .tint(palette.startActionColors.first)
         }
         .padding(20)
         .background(cardBackgroundColor, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
