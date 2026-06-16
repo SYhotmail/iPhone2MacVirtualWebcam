@@ -90,20 +90,27 @@ final class ConnectViewModel {
         let savedOption = defaults.object(forKey: Constants.videoEffectOption) != nil
             ? VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption)) ?? .none
             : .none
-        self.videoEffectOption = savedOption
+        videoEffectOption = savedOption
         manager.setVideoEffect(savedOption.effect)
 
         // Load auto-start setting
-        self.autoStartReceiver = defaults.bool(forKey: Constants.autoStartReceiver)
+        autoStartReceiver = defaults.bool(forKey: Constants.autoStartReceiver)
 
         // Load saved background image
-        if let imagePath = defaults.string(forKey: Constants.backgroundImagePath),
-           let image = NSImage(contentsOfFile: imagePath) {
-            self.backgroundImage = image
-            manager.setBackgroundImage(image)
+        if let imagePath = defaults.string(forKey: Constants.backgroundImagePath) {
+            setBackgroundImage(at: URL(fileURLWithPath: imagePath))
         }
 
         bind()
+    }
+    
+    @discardableResult
+    private func setBackgroundImage(at imageURL: URL?) -> Bool {
+        let image = imageURL.flatMap { NSImage(contentsOf: $0) }
+        backgroundImage = image
+        manager.setBackgroundImage(image)
+        
+        return (imageURL != nil) == (image != nil)
     }
 
     func checkAutoStart() {
@@ -121,62 +128,45 @@ final class ConnectViewModel {
         guard panel.runModal() == .OK, let url = panel.url else {
             return
         }
-
-        guard let image = NSImage(contentsOf: url) else {
-            return
-        }
-
+        
         // Copy image to app's container to persist across restarts
-        if let savedPath = saveImageToAppSupport(image: image, originalURL: url) {
-            defaults.set(savedPath, forKey: Constants.backgroundImagePath)
+        if setBackgroundImage(at: url), let savedPath = try? saveImageToAppSupport(originalURL: url) {
+            defaults.set(savedPath.path, forKey: Constants.backgroundImagePath)
         }
-
-        backgroundImage = image
-        manager.setBackgroundImage(image)
     }
 
     func clearBackgroundImage() {
         // Remove saved image file
-        if let savedPath = defaults.string(forKey: Constants.backgroundImagePath) {
-            try? FileManager.default.removeItem(atPath: savedPath)
+        if setBackgroundImage(at: nil), let savedPath = defaults.string(forKey: Constants.backgroundImagePath) {
+            defaults.removeObject(forKey: Constants.backgroundImagePath)
+            try? FileManager.default.removeItem(at: URL(fileURLWithPath: savedPath))
         }
-
-        backgroundImage = nil
-        defaults.removeObject(forKey: Constants.backgroundImagePath)
-        manager.setBackgroundImage(nil)
     }
 
-    private func saveImageToAppSupport(image: NSImage, originalURL: URL) -> String? {
-        guard let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+    private func saveImageToAppSupport(originalURL: URL) throws -> URL? {
+        let fileManager = FileManager.default
+        guard let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return nil
         }
 
         let appFolder = appSupport.appendingPathComponent(Bundle.main.bundleIdentifier ?? "Cam2Mac")
 
         // Create directory if needed
-        try? FileManager.default.createDirectory(at: appFolder, withIntermediateDirectories: true)
+        try fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
 
         // Use original extension or default to png
-        let ext = originalURL.pathExtension.isEmpty ? "png" : originalURL.pathExtension
-        let fileName = "background_image.\(ext)"
+        let fileName = originalURL.lastPathComponent
         let destinationURL = appFolder.appendingPathComponent(fileName)
 
         // Remove existing file
-        try? FileManager.default.removeItem(at: destinationURL)
-
-        // Save image as PNG or copy original file
-        if let tiffData = image.tiffRepresentation,
-           let bitmapRep = NSBitmapImageRep(data: tiffData),
-           let pngData = bitmapRep.representation(using: .png, properties: [:]) {
-            do {
-                try pngData.write(to: destinationURL)
-                return destinationURL.path
-            } catch {
-                return nil
-            }
+        
+        if fileManager.isDeletableFile(atPath: destinationURL.path()) {
+            try fileManager.removeItem(at: destinationURL)
         }
+        
+        try fileManager.copyItem(at: originalURL, to: destinationURL)
 
-        return nil
+        return destinationURL
     }
 
     var primaryAddressText: String {
