@@ -70,12 +70,7 @@ final class BackgroundBlurMetalRenderer {
         lock.lock()
         defer { lock.unlock() }
 
-        guard let device else {
-            backgroundTexture = nil
-            return
-        }
-
-        guard let image else {
+        guard let device, let image else {
             backgroundTexture = nil
             return
         }
