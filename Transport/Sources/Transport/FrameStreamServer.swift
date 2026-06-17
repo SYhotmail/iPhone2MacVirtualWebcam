@@ -126,7 +126,12 @@ public actor FrameStreamServer {
     }
 
     private func handleNewConnection(_ connection: any TransportConnection) {
-        disconnectClients(forcefully: true)
+        guard connections.isEmpty else {
+            debugPrint("🚫 Rejecting additional client while another iOS stream is active")
+            connection.forceCancel()
+            return
+        }
+
         connections.append(connection)
         bind(to: connection)
         connection.start(queue: connectionQueue)

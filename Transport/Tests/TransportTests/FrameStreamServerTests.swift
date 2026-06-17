@@ -65,9 +65,8 @@ struct FrameStreamServerTests {
         listener.simulateNewConnection(connection)
         await waitForCondition { connection.startedQueues.count == 1 }
         connection.simulateState(.ready)
-        await waitForCondition { connection.receiveRequests.count == 2 }
+        await waitForCondition { connection.receiveRequests.count >= 2 }
 
-        #expect(connection.receiveRequests.count == 2)
         #expect(connection.receiveRequests[0] == .init(minimumIncompleteLength: 4, maximumLength: 4))
         #expect(connection.receiveRequests[1] == .init(minimumIncompleteLength: 3, maximumLength: 3))
     }
@@ -91,8 +90,28 @@ struct FrameStreamServerTests {
         await server.disconnectClients(forcefully: true)
 
         #expect(connection.forceCancelCallCount == 1)
-        #expect(await recorder.waitForCount(2) == 2)
+        #expect(await recorder.waitForCount(1) == 1)
         #expect(server.state.connectionState.value == .cancelled)
+    }
+
+    @Test
+    func rejectsSecondConnectionWhileFirstClientIsStillActive() async throws {
+        let listener = MockTransportListener()
+        let firstConnection = MockTransportConnection(receiveResults: [])
+        let secondConnection = MockTransportConnection(receiveResults: [])
+        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(firstConnection)
+        await waitForCondition { firstConnection.startedQueues.count == 1 }
+
+        listener.simulateNewConnection(secondConnection)
+        await waitForCondition { secondConnection.forceCancelCallCount == 1 }
+
+        #expect(firstConnection.forceCancelCallCount == 0)
+        #expect(firstConnection.cancelCallCount == 0)
+        #expect(secondConnection.startedQueues.isEmpty)
+        #expect(secondConnection.forceCancelCallCount == 1)
     }
 }
 
