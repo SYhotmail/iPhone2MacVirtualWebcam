@@ -4,8 +4,8 @@ Use an iPhone front camera as a virtual webcam on a Mac over your local network.
 
 The project contains:
 
-- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TCP
-- `Cam2Camera`: the macOS app that receives and previews the stream, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
+- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TLS-over-TCP with public-key pinning
+- `Cam2Camera`: the macOS app that receives and previews the stream, terminates the TLS session, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
 - `VirtualCameraExtension`: the macOS system extension that exposes the virtual camera to apps like Zoom and bridges the sink stream to the source stream apps actually read from
 
 ## How It Works
@@ -26,7 +26,7 @@ The virtual camera uses two CoreMediaIO streams:
 
 In other words:
 
-1. iPhone captures and sends H.264 over LAN
+1. iPhone captures and sends H.264 over a pinned TLS session on the LAN
 2. `Cam2Camera` receives and decodes the frames
 3. `Cam2Camera` writes those frames into the virtual camera sink stream
 4. `VirtualCameraExtension` forwards them to the source stream
@@ -209,6 +209,64 @@ The current default port used by the project is:
 ```
 
 The Mac app listens on that port by default, and the iPhone UI also defaults to `9999`.
+
+## Transport Security
+
+The stream transport is configured as:
+
+- `TLS over TCP` using `Network.framework`
+- self-contained server identity on the Mac app from `FrontCameraContinuation/TCPServer/Resources/TLS/cam2mac-server.p12`
+- public-key pinning on the iPhone app using the server certificate's SPKI SHA-256 hash
+
+The pinned public key means the iPhone will only stream to a Mac app presenting the expected server key, even if another host on the network can intercept or spoof the IP/port.
+
+The `.p12` file is intentionally local-only and should not be committed.
+The project builds without it, but the Mac listener cannot accept TLS connections at runtime until you generate or provide the identity file.
+
+### Generate a Local TLS Identity
+
+Create the resources folder if it does not exist:
+
+```bash
+mkdir -p FrontCameraContinuation/TCPServer/Resources/TLS
+```
+
+Generate a local EC private key and self-signed certificate:
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out /tmp/cam2mac-server.key
+openssl req -new -x509 \
+  -key /tmp/cam2mac-server.key \
+  -out /tmp/cam2mac-server.crt \
+  -days 3650 \
+  -subj "/CN=Cam2Mac Local TLS" \
+  -addext "subjectAltName=DNS:cam2mac.local,IP:127.0.0.1"
+```
+
+Export the server identity as the local `.p12` expected by the Mac app:
+
+```bash
+openssl pkcs12 -export \
+  -inkey /tmp/cam2mac-server.key \
+  -in /tmp/cam2mac-server.crt \
+  -out FrontCameraContinuation/TCPServer/Resources/TLS/cam2mac-server.p12 \
+  -passout pass:cam2mac-dev
+```
+
+Recompute the SPKI SHA-256 pin and copy the Base64 result into `ClientTLSConfiguration.default` if you changed the key:
+
+```bash
+openssl x509 -pubkey -noout -in /tmp/cam2mac-server.crt \
+  | openssl pkey -pubin -outform DER \
+  | openssl dgst -sha256 -binary \
+  | openssl base64 -A
+```
+
+If you keep the generated key above, the pinned value currently used by the iPhone app is:
+
+```text
+fpnYZihLev8u7OntmhGhJgr4Gf2GrFhV6sht7Gp84dk=
+```
 
 ## Using the Virtual Camera in Zoom
 

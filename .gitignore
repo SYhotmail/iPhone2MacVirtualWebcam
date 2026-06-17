@@ -46,3 +46,6 @@ H264/.build
 Transport/.build
 
 
+.deriveddata-cam2mac/ModuleCache.noindex
+.deriveddata-cam2mac/
+.deriveddata-ios/

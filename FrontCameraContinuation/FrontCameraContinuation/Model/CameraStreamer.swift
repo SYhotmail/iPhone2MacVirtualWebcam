@@ -10,6 +10,7 @@
 import UIKit
 import Combine
 import H264
+import Network
 import Transport
 
 nonisolated
@@ -17,7 +18,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     typealias ConnectionStatus = FrameStreamClient.Status
 
     private let captureSessionManager = CaptureSessionManager()
-    private let streamClient = FrameStreamClient()
+    private let streamClient: FrameStreamClient
     private var encoder: H264Encoder!
     private let reconnectQueue = DispatchQueue(label: "camera.streamer.reconnect", qos: .utility)
     private var reconnectWorkItem: DispatchWorkItem? {
@@ -38,7 +39,17 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         captureSessionManager.session
     }
 
-    override init() {
+    init(tlsConfiguration: ClientTLSConfiguration = .default) {
+        self.streamClient = FrameStreamClient { host, port in
+            let parameters: NWParameters
+            do {
+                parameters = try tlsConfiguration.makeParameters()
+            } catch {
+                assertionFailure("Invalid client TLS configuration: \(error.localizedDescription)")
+                parameters = NWParameters.tcp
+            }
+            return NWConnection(host: host, port: port, using: parameters)
+        }
         super.init()
         
         encoder = .init(
