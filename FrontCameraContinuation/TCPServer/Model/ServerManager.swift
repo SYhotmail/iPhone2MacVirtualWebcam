@@ -27,9 +27,9 @@ final class ServerManager: @unchecked Sendable {
     let lock = Mutex(())
     private let videoEffectLock = Mutex(VideoEffect.none)
 
-    init(tlsConfiguration: ServerTLSConfiguration = .default) {
+    init(tlsConfiguration: TLSConfiguration = .default) {
         self.streamServer = FrameStreamServer { port in
-            let parameters = try tlsConfiguration.makeParameters(bundle: .main)
+            let parameters = tlsConfiguration.makeParameters()
             return try NWListener(using: parameters, on: port)
         }
     }

@@ -215,58 +215,20 @@ The Mac app listens on that port by default, and the iPhone UI also defaults to 
 The stream transport is configured as:
 
 - `TLS over TCP` using `Network.framework`
-- self-contained server identity on the Mac app from `FrontCameraContinuation/TCPServer/Resources/TLS/cam2mac-server.p12`
-- public-key pinning on the iPhone app using the server certificate's SPKI SHA-256 hash
+- a pre-shared key derived from a shared passcode
+- a shared PSK identity label that both apps must match
 
-The pinned public key means the iPhone will only stream to a Mac app presenting the expected server key, even if another host on the network can intercept or spoof the IP/port.
+The iPhone and Mac must use the same values for:
 
-The `.p12` file is intentionally local-only and should not be committed.
-The project builds without it, but the Mac listener cannot accept TLS connections at runtime until you generate or provide the identity file.
+- `passcode`
+- `serviceLabel`
 
-### Generate a Local TLS Identity
+The current defaults live in:
 
-Create the resources folder if it does not exist:
+- `FrontCameraContinuation/FrontCameraContinuation/Model/ClientTLSConfiguration.swift`
+- `FrontCameraContinuation/TCPServer/Model/ServerTLSConfiguration.swift`
 
-```bash
-mkdir -p FrontCameraContinuation/TCPServer/Resources/TLS
-```
-
-Generate a local EC private key and self-signed certificate:
-
-```bash
-openssl ecparam -name prime256v1 -genkey -noout -out /tmp/cam2mac-server.key
-openssl req -new -x509 \
-  -key /tmp/cam2mac-server.key \
-  -out /tmp/cam2mac-server.crt \
-  -days 3650 \
-  -subj "/CN=Cam2Mac Local TLS" \
-  -addext "subjectAltName=DNS:cam2mac.local,IP:127.0.0.1"
-```
-
-Export the server identity as the local `.p12` expected by the Mac app:
-
-```bash
-openssl pkcs12 -export \
-  -inkey /tmp/cam2mac-server.key \
-  -in /tmp/cam2mac-server.crt \
-  -out FrontCameraContinuation/TCPServer/Resources/TLS/cam2mac-server.p12 \
-  -passout pass:cam2mac-dev
-```
-
-Recompute the SPKI SHA-256 pin and copy the Base64 result into `ClientTLSConfiguration.default` if you changed the key:
-
-```bash
-openssl x509 -pubkey -noout -in /tmp/cam2mac-server.crt \
-  | openssl pkey -pubin -outform DER \
-  | openssl dgst -sha256 -binary \
-  | openssl base64 -A
-```
-
-If you keep the generated key above, the pinned value currently used by the iPhone app is:
-
-```text
-fpnYZihLev8u7OntmhGhJgr4Gf2GrFhV6sht7Gp84dk=
-```
+If you change one side, change the other side to match exactly or the TLS handshake will fail.
 
 ## Using the Virtual Camera in Zoom
 

@@ -39,15 +39,9 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         captureSessionManager.session
     }
 
-    init(tlsConfiguration: ClientTLSConfiguration = .default) {
+    init(tlsConfiguration: TLSConfiguration = .default) {
         self.streamClient = FrameStreamClient { host, port in
-            let parameters: NWParameters
-            do {
-                parameters = try tlsConfiguration.makeParameters()
-            } catch {
-                assertionFailure("Invalid client TLS configuration: \(error.localizedDescription)")
-                parameters = NWParameters.tcp
-            }
+            let parameters = tlsConfiguration.makeParameters()
             return NWConnection(host: host, port: port, using: parameters)
         }
         super.init()
