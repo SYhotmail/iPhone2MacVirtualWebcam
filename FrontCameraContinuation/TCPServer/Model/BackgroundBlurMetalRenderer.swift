@@ -29,30 +29,27 @@ final class BackgroundBlurMetalRenderer {
         self.commandQueue = device?.makeCommandQueue()
 
         let library = try? device?.makeDefaultLibrary(bundle: .main)
+        
+        var yuvToBGRAPipeline: MTLComputePipelineState?
+        var compositePipeline: MTLComputePipelineState?
+        var compositeBackgroundPipeline: MTLComputePipelineState?
 
         if let device, let library {
             if let yuvFunction = library.makeFunction(name: "yuvToBGRA") {
-                self.yuvToBGRAPipeline = try? device.makeComputePipelineState(function: yuvFunction)
-            } else {
-                self.yuvToBGRAPipeline = nil
+                yuvToBGRAPipeline = try? device.makeComputePipelineState(function: yuvFunction)
             }
 
             if let compositeFunction = library.makeFunction(name: "compositePersonMask") {
-                self.compositePipeline = try? device.makeComputePipelineState(function: compositeFunction)
-            } else {
-                self.compositePipeline = nil
+                compositePipeline = try? device.makeComputePipelineState(function: compositeFunction)
             }
 
             if let compositeBackgroundFunction = library.makeFunction(name: "compositePersonOverBackground") {
-                self.compositeBackgroundPipeline = try? device.makeComputePipelineState(function: compositeBackgroundFunction)
-            } else {
-                self.compositeBackgroundPipeline = nil
+                compositeBackgroundPipeline = try? device.makeComputePipelineState(function: compositeBackgroundFunction)
             }
-        } else {
-            self.yuvToBGRAPipeline = nil
-            self.compositePipeline = nil
-            self.compositeBackgroundPipeline = nil
         }
+        self.yuvToBGRAPipeline = yuvToBGRAPipeline
+        self.compositePipeline = compositePipeline
+        self.compositeBackgroundPipeline = compositeBackgroundPipeline
 
         var textureCache: CVMetalTextureCache?
         if let device {

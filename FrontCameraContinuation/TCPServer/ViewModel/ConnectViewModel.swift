@@ -87,9 +87,7 @@ final class ConnectViewModel {
         self.installer = installer
         self.defaults = defaults
 
-        let savedOption = defaults.object(forKey: Constants.videoEffectOption) != nil
-            ? VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption)) ?? .none
-            : .none
+        let savedOption = VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption)) ?? .none
         videoEffectOption = savedOption
         manager.setVideoEffect(savedOption.effect)
 
