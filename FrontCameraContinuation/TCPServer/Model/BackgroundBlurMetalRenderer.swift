@@ -128,7 +128,7 @@ final class BackgroundBlurMetalRenderer {
         return texture
     }
 
-    func process(_ sampleBuffer: CMSampleBuffer, effect: VideoEffect) -> CMSampleBuffer? {
+    func process(_ sampleBuffer: CMSampleBuffer, effect: VideoEffect?) -> CMSampleBuffer? {
         lock.lock()
         defer { lock.unlock() }
 
@@ -192,7 +192,7 @@ final class BackgroundBlurMetalRenderer {
         convertBuffer.waitUntilCompleted()
 
         // If no effect, just return the converted BGRA buffer
-        if effect.isNone {
+        guard let effect else {
             return makeSampleBuffer(from: sourceBuffer, source: sampleBuffer)
         }
 

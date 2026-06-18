@@ -66,13 +66,17 @@ final class ConnectViewModel {
         }
     }
 
-    var videoEffectOption: VideoEffectOption {
+    var videoEffectOption: VideoEffectOption? {
         didSet {
             guard oldValue != videoEffectOption else {
+                Task { [weak self ] in
+                    assert(Thread.isMainThread) // actor capture should be here..
+                    self?.videoEffectOption = nil // reset per set...
+                }
                 return
             }
-            defaults.set(videoEffectOption.rawValue, forKey: Constants.videoEffectOption)
-            manager.setVideoEffect(videoEffectOption.effect)
+            defaults.set(videoEffectOption?.rawValue, forKey: Constants.videoEffectOption)
+            manager.setVideoEffect(videoEffectOption?.effect)
         }
     }
 
@@ -87,9 +91,9 @@ final class ConnectViewModel {
         self.installer = installer
         self.defaults = defaults
 
-        let savedOption = VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption)) ?? .none
+        let savedOption = VideoEffectOption(rawValue: defaults.integer(forKey: Constants.videoEffectOption))
         videoEffectOption = savedOption
-        manager.setVideoEffect(savedOption.effect)
+        manager.setVideoEffect(savedOption?.effect)
 
         // Load auto-start setting
         autoStartReceiver = defaults.bool(forKey: Constants.autoStartReceiver)

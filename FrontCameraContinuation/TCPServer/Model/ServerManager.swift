@@ -25,7 +25,7 @@ final class ServerManager: @unchecked Sendable {
     let decoder = H264Decoder()
     
     let lock = Mutex(())
-    private let videoEffectLock = Mutex(VideoEffect.none)
+    private let videoEffectLock = Mutex<VideoEffect?>(nil)
 
     init(tlsConfiguration: TLSConfiguration = .default) {
         self.streamServer = FrameStreamServer { port in
@@ -83,7 +83,7 @@ final class ServerManager: @unchecked Sendable {
             .onMainAnyPublisher()
     }
 
-    func setVideoEffect(_ effect: VideoEffect) {
+    func setVideoEffect(_ effect: VideoEffect?) {
         videoEffectLock.withLock { value in
             value = effect
         }
