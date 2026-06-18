@@ -36,6 +36,13 @@ public actor FrameStreamServer {
         self.init(listenerFactory: .live)
     }
 
+    public init(listenerBuilder: @escaping @Sendable (NWEndpoint.Port) throws -> NWListener) {
+        self.state = FrameStreamServerState()
+        self.listenerFactory = .init { port in
+            try NWListenerAdapter(listener: listenerBuilder(port))
+        }
+    }
+
     init(listenerFactory: NetworkListenerFactory) {
         self.state = FrameStreamServerState()
         self.listenerFactory = listenerFactory

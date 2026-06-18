@@ -10,12 +10,13 @@ import Combine
 import CoreMedia
 import Foundation
 import H264
+import Network
 import Synchronization
 import Transport
 
 nonisolated
 final class ServerManager: @unchecked Sendable {
-    private let streamServer = FrameStreamServer()
+    private let streamServer: FrameStreamServer
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
     private let blurProcessor = BackgroundBlurMetalRenderer()
@@ -25,6 +26,13 @@ final class ServerManager: @unchecked Sendable {
     
     let lock = Mutex(())
     private let videoEffectLock = Mutex(VideoEffect.none)
+
+    init(tlsConfiguration: TLSConfiguration = .default) {
+        self.streamServer = FrameStreamServer { port in
+            let parameters = tlsConfiguration.makeParameters()
+            return try NWListener(using: parameters, on: port)
+        }
+    }
     
     
     private func setSharedFrameProvider() -> AnyPublisher<CMSampleBuffer, Never> {

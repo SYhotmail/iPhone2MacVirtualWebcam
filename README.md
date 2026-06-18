@@ -4,8 +4,8 @@ Use an iPhone front camera as a virtual webcam on a Mac over your local network.
 
 The project contains:
 
-- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TCP
-- `Cam2Camera`: the macOS app that receives and previews the stream, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
+- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TLS-over-TCP with public-key pinning
+- `Cam2Camera`: the macOS app that receives and previews the stream, terminates the TLS session, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
 - `VirtualCameraExtension`: the macOS system extension that exposes the virtual camera to apps like Zoom and bridges the sink stream to the source stream apps actually read from
 
 ## How It Works
@@ -26,7 +26,7 @@ The virtual camera uses two CoreMediaIO streams:
 
 In other words:
 
-1. iPhone captures and sends H.264 over LAN
+1. iPhone captures and sends H.264 over a pinned TLS session on the LAN
 2. `Cam2Camera` receives and decodes the frames
 3. `Cam2Camera` writes those frames into the virtual camera sink stream
 4. `VirtualCameraExtension` forwards them to the source stream
@@ -209,6 +209,26 @@ The current default port used by the project is:
 ```
 
 The Mac app listens on that port by default, and the iPhone UI also defaults to `9999`.
+
+## Transport Security
+
+The stream transport is configured as:
+
+- `TLS over TCP` using `Network.framework`
+- a pre-shared key derived from a shared passcode
+- a shared PSK identity label that both apps must match
+
+The iPhone and Mac must use the same values for:
+
+- `passcode`
+- `serviceLabel`
+
+The current defaults live in:
+
+- `FrontCameraContinuation/FrontCameraContinuation/Model/ClientTLSConfiguration.swift`
+- `FrontCameraContinuation/TCPServer/Model/ServerTLSConfiguration.swift`
+
+If you change one side, change the other side to match exactly or the TLS handshake will fail.
 
 ## Using the Virtual Camera in Zoom
 

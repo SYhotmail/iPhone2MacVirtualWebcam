@@ -46,6 +46,12 @@ public actor FrameStreamClient {
         self.connectionFactory = .live
     }
 
+    public init(connectionBuilder: @escaping @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection) {
+        self.connectionFactory = .init { host, port in
+            NWConnectionAdapter(connection: connectionBuilder(host, port))
+        }
+    }
+
     init(connectionFactory: NetworkConnectionFactory) {
         self.connectionFactory = connectionFactory
     }
