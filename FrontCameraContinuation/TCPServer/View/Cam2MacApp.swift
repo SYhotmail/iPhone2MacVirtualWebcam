@@ -10,7 +10,18 @@ import SwiftUI
 @main
 struct Cam2MacApp: App {
     @Environment(\.openWindow) private var openWindow
-    @State private var rootVM = ConnectViewModel()
+    @State private var rootVM: ConnectViewModel?
+    @State private var launchError: String?
+
+    init() {
+        do {
+            _rootVM = State(initialValue: try ConnectViewModel())
+            _launchError = State(initialValue: nil)
+        } catch {
+            _rootVM = State(initialValue: nil)
+            _launchError = State(initialValue: error.localizedDescription)
+        }
+    }
     
     enum Constants {
         static let mainWindowId = "main-window"
@@ -19,7 +30,14 @@ struct Cam2MacApp: App {
 
     var body: some Scene {
         WindowGroup("Cam2Mac", id: Constants.mainWindowId) {
-            ConnectView(viewModel: rootVM)
+            Group {
+                if let rootVM {
+                    ConnectView(viewModel: rootVM)
+                } else {
+                    Text(launchError ?? "Failed to start the receiver.")
+                        .padding()
+                }
+            }
         }
         .windowManagerRole(.principal)
         .defaultSize(width: 800, height: 640)
@@ -28,17 +46,33 @@ struct Cam2MacApp: App {
         }
 
         MenuBarExtra {
-            ReceiverMenuBarView(
-                viewModel: rootVM) {
-                    openWindow(id: Constants.mainWindowId)
-                }
+            if let rootVM {
+                ReceiverMenuBarView(
+                    viewModel: rootVM) {
+                        openWindow(id: Constants.mainWindowId)
+                    }
+            } else {
+                Text(launchError ?? "Receiver unavailable")
+                    .padding()
+            }
         } label: {
-            ReceiverMenuBarLabelView(viewModel: rootVM)
+            if let rootVM {
+                ReceiverMenuBarLabelView(viewModel: rootVM)
+            } else {
+                Text("Error")
+            }
         }
 
         WindowGroup("Quick Setup", id: Constants.quickSetupId) {
-            QuickSetupView(viewModel: rootVM.provideQuickSetupViewModel())
-                .frame(minWidth: 400, maxWidth: 900, minHeight: 400)
+            Group {
+                if let rootVM {
+                    QuickSetupView(viewModel: rootVM.provideQuickSetupViewModel())
+                        .frame(minWidth: 400, maxWidth: 900, minHeight: 400)
+                } else {
+                    Text(launchError ?? "Failed to start the receiver.")
+                        .padding()
+                }
+            }
         }
         .defaultSize(width: 500, height: 550)
         .windowManagerRole(.associated)

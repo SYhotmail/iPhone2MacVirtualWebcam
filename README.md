@@ -4,7 +4,7 @@ Use an iPhone front camera as a virtual webcam on a Mac over your local network.
 
 The project contains:
 
-- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over TLS-over-TCP with public-key pinning
+- `Cam2Camera`: the iPhone app that captures the front camera, shows a live preview, encodes the stream, and sends it to your Mac over QUIC with a pinned server certificate
 - `Cam2Camera`: the macOS app that receives and previews the stream, terminates the TLS session, installs the virtual camera system extension, and pushes decoded frames into the virtual camera sink stream
 - `VirtualCameraExtension`: the macOS system extension that exposes the virtual camera to apps like Zoom and bridges the sink stream to the source stream apps actually read from
 
@@ -26,7 +26,7 @@ The virtual camera uses two CoreMediaIO streams:
 
 In other words:
 
-1. iPhone captures and sends H.264 over a pinned TLS session on the LAN
+1. iPhone captures and sends H.264 over a certificate-secured QUIC session on the LAN
 2. `Cam2Camera` receives and decodes the frames
 3. `Cam2Camera` writes those frames into the virtual camera sink stream
 4. `VirtualCameraExtension` forwards them to the source stream
@@ -214,21 +214,26 @@ The Mac app listens on that port by default, and the iPhone UI also defaults to 
 
 The stream transport is configured as:
 
-- `TLS over TCP` using `Network.framework`
-- a pre-shared key derived from a shared passcode
-- a shared PSK identity label that both apps must match
+- `QUIC` using `Network.framework`
+- certificate-based TLS
+- a bundled server certificate presented by the Mac app
+- client-side certificate pinning in the iPhone app
+- a private ALPN: `camera-lan-stream`
 
-The iPhone and Mac must use the same values for:
+The iPhone and Mac must use compatible bundled TLS resources and transport settings. In practice that means:
 
-- `passcode`
-- `serviceLabel`
+- the same bundled server certificate and PKCS#12 identity from the `Transport` package
+- the same QUIC ALPN
+- the same framing protocol on top of the transport
 
 The current defaults live in:
 
-- `FrontCameraContinuation/FrontCameraContinuation/Model/ClientTLSConfiguration.swift`
-- `FrontCameraContinuation/TCPServer/Model/ServerTLSConfiguration.swift`
+- `FrontCameraContinuation/Shared/TLSConfiguration.swift`
+- `Transport/Sources/Transport/TransportTLSParameters.swift`
+- `Transport/Sources/Transport/Resources/cam2mac-local-server.cer`
+- `Transport/Sources/Transport/Resources/cam2mac-local-server.p12`
 
-If you change one side, change the other side to match exactly or the TLS handshake will fail.
+If you change Transport TLS resources or Transport networking code, rebuild both the iPhone app and the Mac app so they embed the same package resources.
 
 ## Using the Virtual Camera in Zoom
 

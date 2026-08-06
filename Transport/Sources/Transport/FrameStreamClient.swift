@@ -1,7 +1,7 @@
 import Foundation
 import Network
 
-/// Sends packetized frame data to a remote receiver over TCP.
+/// Sends packetized frame data to a remote receiver over the configured network transport.
 public actor FrameStreamClient {
     public enum Status: Equatable, Sendable {
         case idle
@@ -42,8 +42,8 @@ public actor FrameStreamClient {
 
     private var onStatusChanged: (@Sendable (Status) -> Void)?
 
-    public init() {
-        self.connectionFactory = .live
+    public init(transport: TransportNetworkProtocol = .tcp) {
+        self.connectionFactory = .live(transport: transport)
     }
 
     public init(connectionBuilder: @escaping @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection) {
