@@ -99,7 +99,7 @@ final class ContentViewModel {
         }
     }
     
-    init(cameraStreamer: CameraStreamer = .init(),
+    init(cameraStreamer: CameraStreamer,
          pipController: CameraPIPManager = .init(),
          launchCoordinator: StreamingLaunchCoordinator = .shared,
          defaults: UserDefaults = .standard) {
@@ -114,6 +114,20 @@ final class ContentViewModel {
         cameraPosition = defaults.object(forKey: Constants.cameraPosition) != nil ? CameraPosition(rawValue: defaults.integer(forKey: Constants.cameraPosition)) ?? .front : .front
         autoStartStreaming = defaults.bool(forKey: Constants.autoStartStreaming)
         bind()
+    }
+
+    convenience init(
+        pipController: CameraPIPManager = .init(),
+        launchCoordinator: StreamingLaunchCoordinator = .shared,
+        defaults: UserDefaults = .standard
+    ) throws {
+        let cameraStreamer = try CameraStreamer()
+        self.init(
+            cameraStreamer: cameraStreamer,
+            pipController: pipController,
+            launchCoordinator: launchCoordinator,
+            defaults: defaults
+        )
     }
 
     func checkAutoStart() {

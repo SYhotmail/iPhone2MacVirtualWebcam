@@ -1,6 +1,26 @@
 import Foundation
 import Network
 
+public enum TransportNetworkProtocol: Sendable {
+    case tcp
+    case quic(alpn: [String] = [])
+    
+    public static var commonQUIC: Self {
+        .quic(alpn: ["camera-lan-stream"])
+    }
+}
+
+extension TransportNetworkProtocol {
+    var nwParameters: NWParameters {
+        switch self {
+        case .tcp:
+            return .tcp
+        case .quic(let alpn):
+            return .quic(alpn: alpn)
+        }
+    }
+}
+
 struct TransportReceiveResult: Sendable {
     let data: Data
     let contentContext: NWConnection.ContentContext?
@@ -83,8 +103,8 @@ final class NWConnectionAdapter: TransportConnection {
         try await withCheckedThrowingContinuation { continuation in
             connection.send(
                 content: content,
-                contentContext: .defaultMessage,
-                isComplete: true,
+                contentContext: .defaultStream,
+                isComplete: false,
                 completion: .contentProcessed({ error in
                     continuation.resume(with: error.flatMap { .failure($0) } ?? .success(()))
                 })
@@ -182,17 +202,21 @@ extension NWListenerAdapter: @unchecked Sendable {}
 struct NetworkConnectionFactory {
     let makeConnection: @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> any TransportConnection
 
-    static let live = Self { host, port in
-        let connection = NWConnection(host: host, port: port, using: .tcp)
-        return NWConnectionAdapter(connection: connection)
+    static func live(transport: TransportNetworkProtocol = .tcp) -> Self {
+        Self { host, port in
+            let connection = NWConnection(host: host, port: port, using: transport.nwParameters)
+            return NWConnectionAdapter(connection: connection)
+        }
     }
 }
 
 struct NetworkListenerFactory {
     let makeListener: @Sendable (NWEndpoint.Port) throws -> any TransportListener
 
-    static let live = Self { port in
-        let listener = try NWListener(using: .tcp, on: port)
-        return NWListenerAdapter(listener: listener)
+    static func live(transport: TransportNetworkProtocol = .tcp) -> Self {
+        Self { port in
+            let listener = try NWListener(using: transport.nwParameters, on: port)
+            return NWListenerAdapter(listener: listener)
+        }
     }
 }

@@ -80,7 +80,7 @@ final class ConnectViewModel {
         }
     }
 
-    init(manager: ServerManager = ServerManager(),
+    init(manager: ServerManager,
          ipProvider: IPAddressProvidable = LocalNetworkAddressProvider(),
          installer: VirtualCameraInstaller = VirtualCameraInstaller(),
          defaults: UserDefaults = .standard,
@@ -104,6 +104,21 @@ final class ConnectViewModel {
         }
 
         bind()
+    }
+
+    convenience init(
+        ipProvider: IPAddressProvidable = LocalNetworkAddressProvider(),
+        installer: VirtualCameraInstaller = VirtualCameraInstaller(),
+        defaults: UserDefaults = .standard,
+        listenPort: UInt16 = 9999
+    ) throws {
+        try self.init(
+            manager: ServerManager(),
+            ipProvider: ipProvider,
+            installer: installer,
+            defaults: defaults,
+            listenPort: listenPort
+        )
     }
     
     @discardableResult

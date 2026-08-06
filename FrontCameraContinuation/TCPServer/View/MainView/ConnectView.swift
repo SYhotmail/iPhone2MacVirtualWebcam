@@ -662,5 +662,5 @@ struct ConnectView: View {
 }
 
 #Preview {
-    ConnectView(viewModel: ConnectViewModel())
+    ConnectView(viewModel: try! ConnectViewModel())
 }

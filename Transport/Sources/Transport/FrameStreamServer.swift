@@ -10,7 +10,7 @@ public final class FrameStreamServerState: @unchecked Sendable {
     public init() {}
 }
 
-/// Receives packetized frame data from a single TCP client.
+/// Receives packetized frame data from a single client over the configured network transport.
 public actor FrameStreamServer {
     public nonisolated let state: FrameStreamServerState
 
@@ -28,12 +28,13 @@ public actor FrameStreamServer {
 
     private var connections = [any TransportConnection]()
     private var inactivityTimers = [ObjectIdentifier: DispatchWorkItem]()
+    private var streamingConnectionIDs = Set<ObjectIdentifier>()
     private let inactivityTimeout: TimeInterval = 2
     private let connectionQueue = DispatchQueue.global(qos: .userInitiated)
     private let listenerFactory: NetworkListenerFactory
 
-    public init() {
-        self.init(listenerFactory: .live)
+    public init(transport: TransportNetworkProtocol = .tcp) {
+        self.init(listenerFactory: .live(transport: transport))
     }
 
     public init(listenerBuilder: @escaping @Sendable (NWEndpoint.Port) throws -> NWListener) {
@@ -133,10 +134,15 @@ public actor FrameStreamServer {
     }
 
     private func handleNewConnection(_ connection: any TransportConnection) {
-        guard connections.isEmpty else {
-            debugPrint("🚫 Rejecting additional client while another iOS stream is active")
-            connection.forceCancel()
-            return
+        if let existingConnection = connections.first {
+            let existingConnectionID = ObjectIdentifier(existingConnection)
+            if streamingConnectionIDs.contains(existingConnectionID) {
+                debugPrint("🚫 Rejecting additional client while another iOS stream is active")
+                connection.forceCancel()
+                return
+            }
+
+            close(existingConnection, cancel: true)
         }
 
         connections.append(connection)
@@ -148,6 +154,7 @@ public actor FrameStreamServer {
         cancelInactivityTimeout(for: connection)
         connection.stateUpdateHandler = nil
         let connectionID = ObjectIdentifier(connection)
+        streamingConnectionIDs.remove(connectionID)
         connections.removeAll { ObjectIdentifier($0) == connectionID }
     }
 
@@ -163,19 +170,15 @@ public actor FrameStreamServer {
 
     private func readSize(from connection: any TransportConnection) async {
         let headerByteCount = FramePacket.headerByteCount
-        let result: TransportReceiveResult
+        let header: Data
         do {
-            result = try await connection.receive(
-                minimumIncompleteLength: headerByteCount,
-                maximumLength: headerByteCount
-            )
+            header = try await readExactByteCount(headerByteCount, from: connection)
         } catch {
             debugPrint("❌ Failed to read size:", error)
             cancelAndClose(connection)
             return
         }
 
-        let header = result.data
         guard header.count == headerByteCount else {
             debugPrint("❌ Failed to read size: invalid header length \(header.count)")
             cancelAndClose(connection)
@@ -187,19 +190,15 @@ public actor FrameStreamServer {
     }
 
     private func readFrame(from connection: any TransportConnection, expectedSize: Int) async {
-        let result: TransportReceiveResult
+        let frame: Data
         do {
-            result = try await connection.receive(
-                minimumIncompleteLength: expectedSize,
-                maximumLength: expectedSize
-            )
+            frame = try await readExactByteCount(expectedSize, from: connection)
         } catch {
             debugPrint("❌ Failed to read frame:", error)
             cancelAndClose(connection)
             return
         }
 
-        let frame = result.data
         guard frame.count == expectedSize else {
             debugPrint("❌ Failed to read frame: expected \(expectedSize) bytes, got \(frame.count)")
             cancelAndClose(connection)
@@ -210,6 +209,7 @@ public actor FrameStreamServer {
     }
 
     private func finishReceivingFrame(_ frame: Data, from connection: any TransportConnection) {
+        streamingConnectionIDs.insert(ObjectIdentifier(connection))
         scheduleInactivityTimeout(for: connection)
         onFrame?(frame)
         receive(from: connection)
@@ -245,6 +245,33 @@ public actor FrameStreamServer {
 
     private func connection(matching identifier: ObjectIdentifier) -> (any TransportConnection)? {
         connections.first { ObjectIdentifier($0) == identifier }
+    }
+
+    private func readExactByteCount(_ expectedSize: Int, from connection: any TransportConnection) async throws -> Data {
+        var accumulated = Data()
+        accumulated.reserveCapacity(expectedSize)
+
+        while accumulated.count < expectedSize {
+            let remaining = expectedSize - accumulated.count
+            let result = try await connection.receive(
+                minimumIncompleteLength: 1,
+                maximumLength: remaining
+            )
+
+            if !result.data.isEmpty {
+                accumulated.append(result.data)
+            }
+
+            if result.isComplete && accumulated.count < expectedSize {
+                throw NSError(
+                    domain: "frame-stream-server",
+                    code: Int(POSIXErrorCode.ENOTCONN.rawValue),
+                    userInfo: [NSLocalizedDescriptionKey: "Stream ended before \(expectedSize) bytes were received"]
+                )
+            }
+        }
+
+        return accumulated
     }
 
     private func close(_ connection: any TransportConnection, cancel: Bool) {

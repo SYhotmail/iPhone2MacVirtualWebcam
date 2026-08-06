@@ -1,5 +1,6 @@
 import Foundation
 import Network
+import Security
 
 public enum TransportNetworkError: Sendable, Equatable, CustomDebugStringConvertible {
     case posix(POSIXErrorCode)
@@ -45,7 +46,9 @@ public enum TransportNetworkError: Sendable, Equatable, CustomDebugStringConvert
         case .dns(let code):
             return "DNS error \(code)"
         case .tls(let code):
-            return "TLS error \(code)"
+            let status = OSStatus(code)
+            let message = SecCopyErrorMessageString(status, nil) as String? ?? "unknown TLS error"
+            return "TLS error \(code) (\(message))"
         case .wifiAware(let code):
             return "Wi-Fi Aware error \(code)"
         }
