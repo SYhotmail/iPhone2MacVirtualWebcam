@@ -18,10 +18,14 @@ public actor FrameStreamClient {
             oldValue.cancel()
         }
     }
+    
+    typealias TransportConnectionFactory = @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> any TransportConnection
+    public typealias NWConnectionFactory = @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection
+    
     private var connectionID: ObjectIdentifier?
     private var currentHost: String?
     private var currentPort: UInt16?
-    private let connectionFactory: NetworkConnectionFactory
+    private let connectionFactory: TransportConnectionFactory
 
     private var status: Status = .idle {
         didSet {
@@ -43,16 +47,21 @@ public actor FrameStreamClient {
     private var onStatusChanged: (@Sendable (Status) -> Void)?
 
     public init(transport: TransportNetworkProtocol = .tcp) {
-        self.connectionFactory = .live(transport: transport)
+        let parameters = transport.nwParameters
+        let connectionBuilder: NWConnectionFactory = { host, port in
+            NWConnection(host: host, port: port, using: parameters)
+        }
+        
+        self.init(connectionBuilder: connectionBuilder)
     }
 
-    public init(connectionBuilder: @escaping @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection) {
-        self.connectionFactory = .init { host, port in
+    public init(connectionBuilder: @escaping NWConnectionFactory) {
+        self.connectionFactory = { host, port in
             NWConnectionAdapter(connection: connectionBuilder(host, port))
         }
     }
 
-    init(connectionFactory: NetworkConnectionFactory) {
+    init(connectionFactory: @escaping TransportConnectionFactory) {
         self.connectionFactory = connectionFactory
     }
 
@@ -85,7 +94,7 @@ public actor FrameStreamClient {
         status = .connecting
 
         let endpoint = NWEndpoint.Host(host)
-        let connection = connectionFactory.makeConnection(endpoint, nwPort)
+        let connection = connectionFactory(endpoint, nwPort)
         let connectionID = ObjectIdentifier(connection)
         self.connectionID = connectionID
 

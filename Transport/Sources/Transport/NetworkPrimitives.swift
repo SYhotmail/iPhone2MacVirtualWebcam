@@ -3,10 +3,11 @@ import Network
 
 public enum TransportNetworkProtocol: Sendable {
     case tcp
-    case quic(alpn: [String] = [])
+    case quic(alpn: [String] = [],
+              direction: NWProtocolQUIC.Options.Direction = .bidirectional)
     
     public static var commonQUIC: Self {
-        .quic(alpn: ["camera-lan-stream"])
+        .quic(alpn: ["camera-lan-stream"], direction: .unidirectional)
     }
 }
 
@@ -15,7 +16,7 @@ extension TransportNetworkProtocol {
         switch self {
         case .tcp:
             return .tcp
-        case .quic(let alpn):
+        case .quic(let alpn, _):
             return .quic(alpn: alpn)
         }
     }
@@ -199,24 +200,3 @@ final class NWListenerAdapter: TransportListener {
 
 extension NWListenerAdapter: @unchecked Sendable {}
 
-struct NetworkConnectionFactory {
-    let makeConnection: @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> any TransportConnection
-
-    static func live(transport: TransportNetworkProtocol = .tcp) -> Self {
-        Self { host, port in
-            let connection = NWConnection(host: host, port: port, using: transport.nwParameters)
-            return NWConnectionAdapter(connection: connection)
-        }
-    }
-}
-
-struct NetworkListenerFactory {
-    let makeListener: @Sendable (NWEndpoint.Port) throws -> any TransportListener
-
-    static func live(transport: TransportNetworkProtocol = .tcp) -> Self {
-        Self { port in
-            let listener = try NWListener(using: transport.nwParameters, on: port)
-            return NWListenerAdapter(listener: listener)
-        }
-    }
-}

@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 import Network
 import Security
@@ -9,34 +8,6 @@ public enum TransportTLSParameters {
         static let certificateExtension = "cer"
         static let identityExtension = "p12"
         static let identityPassword = "cam2mac-local-cert"
-    }
-
-    nonisolated public static func makePreSharedKeyParameters(
-        passcode: String,
-        serviceLabel: String,
-        minimumTLSVersion: tls_protocol_version_t = .TLSv13,
-        transport: TransportNetworkProtocol = .commonQUIC
-    ) -> NWParameters {
-        switch transport {
-        case .tcp:
-            return .init(
-                tls: Self.tlsOptions(
-                    passcode: passcode,
-                    serviceLabel: serviceLabel,
-                    minimumTLSVersion: minimumTLSVersion
-                )
-            )
-        case .quic(let alpn):
-            let quicOptions = NWProtocolQUIC.Options(alpn: alpn)
-            configureSecurityOptions(
-                quicOptions.securityProtocolOptions,
-                passcode: passcode,
-                serviceLabel: serviceLabel,
-                minimumTLSVersion: quicMinimumTLSVersion(requested: minimumTLSVersion),
-                appendLegacyPSKCipherSuite: false
-            )
-            return .init(quic: quicOptions)
-        }
     }
 
     nonisolated public static func makeClientCertificateParameters(
@@ -54,8 +25,9 @@ public enum TransportTLSParameters {
                 minimumTLSVersion: minimumTLSVersion
             )
             return .init(tls: tlsOptions, tcp: .init())
-        case .quic(let alpn):
+        case .quic(let alpn, let direction):
             let quicOptions = NWProtocolQUIC.Options(alpn: alpn)
+            quicOptions.direction = direction
             configurePinnedCertificateVerification(
                 quicOptions.securityProtocolOptions,
                 pinnedCertificateData: pinnedCertificateData,
@@ -80,8 +52,9 @@ public enum TransportTLSParameters {
                 minimumTLSVersion: minimumTLSVersion
             )
             return .init(tls: tlsOptions, tcp: .init())
-        case .quic(let alpn):
+        case let .quic(alpn, direction):
             let quicOptions = NWProtocolQUIC.Options(alpn: alpn)
+            quicOptions.direction = direction
             configureLocalIdentity(
                 quicOptions.securityProtocolOptions,
                 identity: identity,
@@ -90,83 +63,6 @@ public enum TransportTLSParameters {
             return .init(quic: quicOptions)
         }
     }
-    
-    private static func tlsOptions(passcode: String,
-                                   serviceLabel: String,
-                                   minimumTLSVersion: tls_protocol_version_t) -> NWProtocolTLS.Options? {
-        
-        guard let serviceLabelData = serviceLabel.data(using: .utf8),
-              let passwordData = passcode.data(using: .utf8) else {
-            return nil
-        }
-        
-        guard tls_ciphersuite_t(rawValue: UInt16(TLS_PSK_WITH_AES_128_GCM_SHA256)) != nil else {
-            return nil
-        }
-        
-        let tlsOptions = NWProtocolTLS.Options()
-        configureSecurityOptions(
-            tlsOptions.securityProtocolOptions,
-            passcodeData: passwordData,
-            serviceLabelData: serviceLabelData,
-            minimumTLSVersion: minimumTLSVersion,
-            appendLegacyPSKCipherSuite: true
-        )
-        
-        return tlsOptions
-    }
-
-    private static func configureSecurityOptions(
-        _ securityOptions: sec_protocol_options_t,
-        passcode: String,
-        serviceLabel: String,
-        minimumTLSVersion: tls_protocol_version_t,
-        appendLegacyPSKCipherSuite: Bool
-    ) {
-        guard let serviceLabelData = serviceLabel.data(using: .utf8),
-              let passwordData = passcode.data(using: .utf8) else {
-            return
-        }
-
-        configureSecurityOptions(
-            securityOptions,
-            passcodeData: passwordData,
-            serviceLabelData: serviceLabelData,
-            minimumTLSVersion: minimumTLSVersion,
-            appendLegacyPSKCipherSuite: appendLegacyPSKCipherSuite
-        )
-    }
-
-    private static func configureSecurityOptions(
-        _ securityOptions: sec_protocol_options_t,
-        passcodeData: Data,
-        serviceLabelData: Data,
-        minimumTLSVersion: tls_protocol_version_t,
-        appendLegacyPSKCipherSuite: Bool
-    ) {
-        guard let legacyPSKCipherSuite = tls_ciphersuite_t(rawValue: UInt16(TLS_PSK_WITH_AES_128_GCM_SHA256)) else {
-            return
-        }
-
-        let authenticationKey = SymmetricKey(data: passcodeData)
-        let authenticationCode = HMAC<SHA256>.authenticationCode(
-            for: serviceLabelData,
-            using: authenticationKey
-        )
-        let pskData = authenticationCode.withUnsafeBytes { DispatchData(bytes: $0) }
-        let pskIdentityData = serviceLabelData.withUnsafeBytes { DispatchData(bytes: $0) }
-
-        sec_protocol_options_add_pre_shared_key(
-            securityOptions,
-            pskData as dispatch_data_t,
-            pskIdentityData as dispatch_data_t
-        )
-        sec_protocol_options_set_min_tls_protocol_version(securityOptions, minimumTLSVersion)
-        if appendLegacyPSKCipherSuite {
-            sec_protocol_options_append_tls_ciphersuite(securityOptions, legacyPSKCipherSuite)
-        }
-    }
-
     private static func quicMinimumTLSVersion(requested: tls_protocol_version_t) -> tls_protocol_version_t {
         switch requested {
         case .TLSv10, .TLSv11, .TLSv12:

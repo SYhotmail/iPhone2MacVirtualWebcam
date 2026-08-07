@@ -31,20 +31,25 @@ public actor FrameStreamServer {
     private var streamingConnectionIDs = Set<ObjectIdentifier>()
     private let inactivityTimeout: TimeInterval = 2
     private let connectionQueue = DispatchQueue.global(qos: .userInitiated)
-    private let listenerFactory: NetworkListenerFactory
+    typealias TransportListenerFactory = @Sendable (NWEndpoint.Port) throws -> any TransportListener
+    public typealias NWListenerFactory = @Sendable (NWEndpoint.Port) throws -> NWListener
+    private let listenerFactory: TransportListenerFactory
 
     public init(transport: TransportNetworkProtocol = .tcp) {
-        self.init(listenerFactory: .live(transport: transport))
+        let parameters = transport.nwParameters
+        self.init { port in
+            let listener = try NWListener(using: parameters, on: port)
+            return NWListenerAdapter(listener: listener)
+        }
     }
 
-    public init(listenerBuilder: @escaping @Sendable (NWEndpoint.Port) throws -> NWListener) {
-        self.state = FrameStreamServerState()
-        self.listenerFactory = .init { port in
+    public init(listenerBuilder: @escaping NWListenerFactory) {
+        self.init { port in
             try NWListenerAdapter(listener: listenerBuilder(port))
         }
     }
 
-    init(listenerFactory: NetworkListenerFactory) {
+    init(listenerFactory: @escaping TransportListenerFactory) {
         self.state = FrameStreamServerState()
         self.listenerFactory = listenerFactory
     }
@@ -62,7 +67,7 @@ public actor FrameStreamServer {
             throw NSError(domain: "frame-stream-server", code: .min, userInfo: [NSLocalizedFailureErrorKey: "Invalid port \(port)"])
         }
 
-        let listener = try listenerFactory.makeListener(portValue)
+        let listener = try listenerFactory(portValue)
         listener.newConnectionHandler = { [weak self] connection in
             guard let self else { return }
             Task {
