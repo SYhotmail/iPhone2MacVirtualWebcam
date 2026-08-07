@@ -16,14 +16,23 @@ import Transport
 
 nonisolated
 final class ServerManager: @unchecked Sendable {
+    private struct FrameProcessingState {
+        var pendingSampleBuffer: CMSampleBuffer?
+        var isProcessing = false
+    }
+
     private let streamServer: FrameStreamServer
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
     private let blurProcessor = BackgroundBlurMetalRenderer()
     private var decodedFrameCancellable: Task<Void,Never>?
+    private var decodedFrameInputCancellable: AnyCancellable?
     private var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
+    private let processedFramePublisher = PassthroughSubject<CMSampleBuffer, Never>()
     let decoder = H264Decoder()
-    
+    let queue = DispatchQueue(label: "videoeffect.queue")
+    private let frameProcessingStateQueue = DispatchQueue(label: "server.frame-processing.state")
+    private var frameProcessingState = FrameProcessingState()
     let lock = Mutex(())
     private let videoEffectLock = Mutex<VideoEffect?>(nil)
 
@@ -34,21 +43,15 @@ final class ServerManager: @unchecked Sendable {
         }
     }
     
+    private func processSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
+        let effect = videoEffect
+        let inputSampleBuffer = blurProcessor.process(sampleBuffer, effect: effect) ?? sampleBuffer
+        return frameConverter.makeSampleBuffer(from: inputSampleBuffer)
+    }
+    
     nonisolated
     func frameProvider() -> AnyPublisher<CMSampleBuffer, Never> {
-        decoder.publisher
-            .map { $0.value }
-            .receive(on: DispatchQueue.global(qos: .userInitiated))
-            .compactMap { [weak self] sampleBuffer -> CMSampleBuffer? in
-                guard let self else {
-                    return nil
-                }
-
-                let effect = self.videoEffect
-                let inputSampleBuffer = self.blurProcessor.process(sampleBuffer, effect: effect) ?? sampleBuffer
-                return self.frameConverter.makeSampleBuffer(from: inputSampleBuffer)
-            }
-            .share()
+        processedFramePublisher
             .eraseToAnyPublisher()
     }
 
@@ -57,7 +60,7 @@ final class ServerManager: @unchecked Sendable {
             return value
         }
         
-        let sharedFrameProvider = frameProvider()
+        let sharedFrameProvider = frameProvider().buffer(size: 1, prefetch: .byRequest, whenFull: .dropOldest).eraseToAnyPublisher()
         self._sharedFrameProvider = sharedFrameProvider
         return sharedFrameProvider
     }
@@ -102,8 +105,13 @@ final class ServerManager: @unchecked Sendable {
     }
     
     private func bindCore(port: UInt16) {
-        decodedFrameCancellable = Task {
+        Task {
             await bindStreamServerCore()
+        }
+
+        bindDecodedFrameProcessing()
+        
+        decodedFrameCancellable = Task {
             guard !Task.isCancelled else {
                 return
             }
@@ -128,7 +136,7 @@ final class ServerManager: @unchecked Sendable {
         }
 
         await streamServer.setStreamUnavailableHandler { [weak self] in
-            self?.resetDecoder()
+            self?.handleStreamUnavailable()
         }
     }
     
@@ -151,6 +159,65 @@ final class ServerManager: @unchecked Sendable {
         await streamServer.stop()
     }
     
+    private func bindDecodedFrameProcessing() {
+        decodedFrameInputCancellable = decoder.publisher
+            .sink { [weak self] sampleBuffer in
+                self?.enqueueLatestDecodedFrame(sampleBuffer.value)
+            }
+    }
+
+    private func enqueueLatestDecodedFrame(_ sampleBuffer: CMSampleBuffer) {
+        var shouldStartProcessing = false
+        frameProcessingStateQueue.sync {
+            frameProcessingState.pendingSampleBuffer = sampleBuffer
+            guard !frameProcessingState.isProcessing else {
+                shouldStartProcessing = false
+                return
+            }
+            frameProcessingState.isProcessing = true
+            shouldStartProcessing = true
+        }
+
+        guard shouldStartProcessing else {
+            return
+        }
+
+        queue.async { [weak self] in
+            self?.drainLatestDecodedFrames()
+        }
+    }
+
+    private func drainLatestDecodedFrames() {
+        while let pendingSampleBuffer = takePendingDecodedFrame() {
+            guard let processedSampleBuffer = processSampleBuffer(pendingSampleBuffer) else {
+                continue
+            }
+            processedFramePublisher.send(processedSampleBuffer)
+        }
+    }
+
+    private func takePendingDecodedFrame() -> CMSampleBuffer? {
+        frameProcessingStateQueue.sync {
+            guard let pendingSampleBuffer = frameProcessingState.pendingSampleBuffer else {
+                frameProcessingState.isProcessing = false
+                return nil
+            }
+            frameProcessingState.pendingSampleBuffer = nil
+            return pendingSampleBuffer
+        }
+    }
+
+    private func clearPendingDecodedFrames() {
+        frameProcessingStateQueue.sync {
+            frameProcessingState.pendingSampleBuffer = nil
+        }
+    }
+
+    private func handleStreamUnavailable() {
+        clearPendingDecodedFrames()
+        resetDecoder()
+    }
+
     private func resetDecoder() {
         decoder.scheduleToReset()
     }
@@ -166,17 +233,23 @@ final class ServerManager: @unchecked Sendable {
         }
     }
     
+    private func unbindStreamServerCore() async {
+        await streamServer.setFrameHandler(nil)
+        await streamServer.setStreamUnavailableHandler(nil)
+    }
+    
     private func unbindCore() {
         decodedFrameCancellable?.cancel()
+        decodedFrameInputCancellable = nil
+        clearPendingDecodedFrames()
         Task {
-            await streamServer.setFrameHandler(nil)
-            await streamServer.setStreamUnavailableHandler(nil)
+            await unbindStreamServerCore()
         }
     }
 }
 
 extension ServerManager: PreviewDecodedFrameProvidable {
     nonisolated func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never> {
-        frameProvider()
+        sharedFrameProvider
     }
 }

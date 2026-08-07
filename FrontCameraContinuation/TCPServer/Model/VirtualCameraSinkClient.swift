@@ -49,8 +49,11 @@ actor VirtualCameraSinkClient {
         guard CMSimpleQueueGetCount(sinkQueue) < CMSimpleQueueGetCapacity(sinkQueue) else { return }
 
         readyToEnqueue = false
-        let sampleBuffer = sampleBuffer.value
-        let retainedSampleBuffer = Unmanaged.passRetained(sampleBuffer)
+        
+        let imageBuffer = sampleBuffer.value.imageBuffer
+        
+        let sampleBuffer = imageBuffer.flatMap { H264Decoder.makeSampleBuffer(from: $0) }
+        let retainedSampleBuffer = Unmanaged.passRetained(sampleBuffer!) // TODO: fix me...
         let status = CMSimpleQueueEnqueue(sinkQueue, element: retainedSampleBuffer.toOpaque())
         let success = status == noErr
         readyToEnqueue = !success
@@ -111,9 +114,9 @@ actor VirtualCameraSinkClient {
                     await sinkClient.markReadyToEnqueue()
                 }
                 
-                if let token { // TODO: fix me.
+                /*if let token { // TODO: fix me.
                     Unmanaged<CMSampleBuffer>.fromOpaque(token).release()
-                }
+                }*/
             },
             refCon,
             queuePointer

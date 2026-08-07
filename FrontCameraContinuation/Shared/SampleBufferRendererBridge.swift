@@ -28,6 +28,7 @@ final class SampleBufferRendererBridge {
                                                 renderer: AVSampleBufferVideoRenderer,
                                                 renderQueue: DispatchQueue) -> AnyCancellable {
         return frameProvider.decodedFrameSubject()
+            .buffer(size: 1, prefetch: .byRequest, whenFull: .dropOldest)
             .receive(on: renderQueue)
             .sink { [weak renderer] sampleBuffer in
                 guard let renderer, renderer.isReadyForMoreMediaData else {
