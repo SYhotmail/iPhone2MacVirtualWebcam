@@ -68,6 +68,13 @@
             ReferencedContainer = "container:FrontCameraContinuation.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "QUIC_LOG_DIRECTORY"
+            value = "~/tmp"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"

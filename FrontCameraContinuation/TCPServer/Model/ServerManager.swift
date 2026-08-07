@@ -95,22 +95,25 @@ final class ServerManager: @unchecked Sendable {
     
     private func bindCore(port: UInt16) {
         decodedFrameCancellable = sharedFrameProvider
-            .sink { [weak self] sampleBuffer in
-                self?.sinkClient.enqueue(sampleBuffer)
+            .map { H264Decoder.SendableSampleBuffer(value: $0) }
+            .sink { sampleBuffer in
+                Task { [weak self] in
+                    await self?.sinkClient.enqueue(sampleBuffer)
+                }
             }
 
         Task { [weak self] in
-            guard let self else {
-                return
-            }
+            await self?.bindStreamServerCore()
+        }
+    }
+    
+    private func bindStreamServerCore() async {
+        await streamServer.setFrameHandler { [weak self] data in
+            self?.decoder.scheduleToDecode(data)
+        }
 
-            await streamServer.setFrameHandler { [weak self] data in
-                self?.decoder.scheduleToDecode(data)
-            }
-
-            await streamServer.setStreamUnavailableHandler { [weak self] in
-                self?.decoder.scheduleToReset()
-            }
+        await streamServer.setStreamUnavailableHandler { [weak self] in
+            self?.resetDecoder()
         }
     }
     
@@ -118,10 +121,19 @@ final class ServerManager: @unchecked Sendable {
         lock.withLock { _ in
             bindCore(port: port)
         }
-        sinkClient.start()
         Task {
-            try? await streamServer.start(on: port)
+            await startCore(port: port)
         }
+    }
+    
+    private func startCore(port: UInt16) async {
+        await sinkClient.start()
+        try? await streamServer.start(on: port)
+    }
+    
+    private func stopCore() async {
+        await sinkClient.stop()
+        await streamServer.stop()
     }
     
     private func resetDecoder() {
@@ -133,10 +145,9 @@ final class ServerManager: @unchecked Sendable {
             unbindCore()
         }
         
-        sinkClient.stop()
         resetDecoder()
         Task {
-            await streamServer.stop()
+            await stopCore()
         }
     }
     

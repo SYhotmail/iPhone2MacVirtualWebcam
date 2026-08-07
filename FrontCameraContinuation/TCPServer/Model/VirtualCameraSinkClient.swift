@@ -3,10 +3,9 @@ import CoreMedia
 import CoreMediaIO
 import OSLog
 import Synchronization
+import H264
 
-nonisolated
-final class VirtualCameraSinkClient: @unchecked Sendable {
-    private let lock = Mutex(())
+actor VirtualCameraSinkClient {
     private let logger = Logger(subsystem: "by.sy.TCPServer", category: "virtual-camera-sink")
 
     private var deviceID: CMIODeviceID?
@@ -14,18 +13,23 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
     private var sinkQueue: CMSimpleQueue?
     private var readyToEnqueue = true
 
-    func start() {
+    func start() async {
         logger.debug("Starting virtual camera sink client")
-        ensureVideoAccessAndConnect()
+        let mediaType = AVMediaType.video
+        let status = ensureVideoAccessAndConnect(mediaType: mediaType)
+        if case .notDetermined = status {
+            let granted = await AVCaptureDevice.requestAccess(for: mediaType)
+            guard granted else {
+                logger.debug("Camera access denied")
+                return
+            }
+            logger.debug("Camera access granted")
+            connectIfNeeded()
+        }
     }
 
     func stop() {
-        lock.withLock { _ in
-            self.stopCore()
-        }
-    }
-    
-    private func stopCore() {
+        logger.debug("Stopping virtual camera sink client")
         if let deviceID, let sinkStreamID {
             CMIODeviceStopStream(deviceID, sinkStreamID)
             logger.debug("Stopped sink stream \(sinkStreamID)")
@@ -37,19 +41,15 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
         readyToEnqueue = true
     }
 
-    func enqueue(_ sampleBuffer: CMSampleBuffer) {
-        connectIfNeeded()
-        lock.withLock { _ in
-            self.enqueueCore(sampleBuffer)
-        }
-    }
     
-    private func enqueueCore(_ sampleBuffer: CMSampleBuffer) {
+    func enqueue(_ sampleBuffer: H264Decoder.SendableSampleBuffer) {
+        connectIfNeeded()
         guard readyToEnqueue else { return }
         guard let sinkQueue else { return }
         guard CMSimpleQueueGetCount(sinkQueue) < CMSimpleQueueGetCapacity(sinkQueue) else { return }
 
         readyToEnqueue = false
+        let sampleBuffer = sampleBuffer.value
         let retainedSampleBuffer = Unmanaged.passRetained(sampleBuffer)
         let status = CMSimpleQueueEnqueue(sinkQueue, element: retainedSampleBuffer.toOpaque())
         let success = status == noErr
@@ -63,29 +63,15 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
         
         logger.debug("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
     }
-    
-    private func connectIfNeeded() {
-        lock.withLock { _ in
-            self.connectIfNeededCore()
-        }
-    }
 
-    private func ensureVideoAccessAndConnect() {
-        let mediaType = AVMediaType.video
-        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+    @discardableResult
+    private func ensureVideoAccessAndConnect(mediaType: AVMediaType) -> AVAuthorizationStatus {
+        let status = AVCaptureDevice.authorizationStatus(for: mediaType)
+        switch status {
         case .authorized:
             connectIfNeeded()
         case .notDetermined:
             logger.debug("Requesting camera access for virtual camera discovery")
-            AVCaptureDevice.requestAccess(for: mediaType) { [weak self] granted in
-                guard let self, granted else {
-                    self?.logger.debug("Camera access denied")
-                    return
-                }
-                self.logger.debug("Camera access granted")
-                
-                self.connectIfNeeded()
-            }
         case .denied:
             logger.debug("Camera access denied")
         case .restricted:
@@ -93,9 +79,10 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
         @unknown default:
             logger.debug("Camera access status unknown")
         }
+        return status
     }
 
-    private func connectIfNeededCore() {
+    private func connectIfNeeded() {
         guard sinkQueue == nil else { return }
         logger.debug("Attempting sink connection")
         guard let match = findVirtualCamera() else {
@@ -120,7 +107,9 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
             { _, _, refCon in
                 guard let refCon else { return }
                 let sinkClient = Unmanaged<VirtualCameraSinkClient>.fromOpaque(refCon).takeUnretainedValue()
-                sinkClient.markReadyToEnqueue()
+                Task { [sinkClient] in
+                    await sinkClient.markReadyToEnqueue()
+                }
             },
             refCon,
             queuePointer
@@ -148,9 +137,7 @@ final class VirtualCameraSinkClient: @unchecked Sendable {
     }
 
     private func markReadyToEnqueue() {
-        lock.withLock { _ in
-            readyToEnqueue = true
-        }
+        readyToEnqueue = true
         logger.debug("Sink stream is ready for another sample buffer")
     }
 
