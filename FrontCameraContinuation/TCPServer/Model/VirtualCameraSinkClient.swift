@@ -104,11 +104,15 @@ actor VirtualCameraSinkClient {
         let refCon = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         let status = CMIOStreamCopyBufferQueue(
             sinkStreamID,
-            { _, _, refCon in
+            { _, token, refCon in
                 guard let refCon else { return }
                 let sinkClient = Unmanaged<VirtualCameraSinkClient>.fromOpaque(refCon).takeUnretainedValue()
                 Task { [sinkClient] in
                     await sinkClient.markReadyToEnqueue()
+                }
+                
+                if let token { // TODO: fix me.
+                    Unmanaged<CMSampleBuffer>.fromOpaque(token).release()
                 }
             },
             refCon,

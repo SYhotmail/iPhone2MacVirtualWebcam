@@ -20,7 +20,7 @@ final class ServerManager: @unchecked Sendable {
     private let sinkClient = VirtualCameraSinkClient()
     private let frameConverter = VirtualCameraSampleBufferConverter()
     private let blurProcessor = BackgroundBlurMetalRenderer()
-    private var decodedFrameCancellable: AnyCancellable?
+    private var decodedFrameCancellable: Task<Void,Never>?
     private var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
     let decoder = H264Decoder()
     
@@ -34,28 +34,32 @@ final class ServerManager: @unchecked Sendable {
         }
     }
     
-    
-    private func setSharedFrameProvider() -> AnyPublisher<CMSampleBuffer, Never> {
-        if let value = _sharedFrameProvider {
-            return value
-        }
-        
-        let _sharedFrameProvider = decoder.publisher
-            .receive(on: DispatchQueue.global(qos: .userInitiated))
+    nonisolated
+    func frameProvider() -> AnyPublisher<CMSampleBuffer, Never> {
+        decoder.publisher
             .map { $0.value }
+            .receive(on: DispatchQueue.global(qos: .userInitiated))
             .compactMap { [weak self] sampleBuffer -> CMSampleBuffer? in
                 guard let self else {
                     return nil
                 }
 
-                let effect = self.videoEffectLock.withLock { $0 }
+                let effect = self.videoEffect
                 let inputSampleBuffer = self.blurProcessor.process(sampleBuffer, effect: effect) ?? sampleBuffer
                 return self.frameConverter.makeSampleBuffer(from: inputSampleBuffer)
             }
             .share()
             .eraseToAnyPublisher()
-        self._sharedFrameProvider = _sharedFrameProvider
-        return _sharedFrameProvider
+    }
+
+    private func setSharedFrameProvider() -> AnyPublisher<CMSampleBuffer, Never> {
+        if let value = _sharedFrameProvider {
+            return value
+        }
+        
+        let sharedFrameProvider = frameProvider()
+        self._sharedFrameProvider = sharedFrameProvider
+        return sharedFrameProvider
     }
     
     private var sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never> {
@@ -88,22 +92,33 @@ final class ServerManager: @unchecked Sendable {
             value = effect
         }
     }
+    
+    var videoEffect: VideoEffect? {
+        videoEffectLock.withLock { $0 }
+    }
 
     func setBackgroundImage(_ image: NSImage?) {
         blurProcessor.setBackgroundImage(image)
     }
     
     private func bindCore(port: UInt16) {
-        decodedFrameCancellable = sharedFrameProvider
-            .map { H264Decoder.SendableSampleBuffer(value: $0) }
-            .sink { sampleBuffer in
-                Task { [weak self] in
-                    await self?.sinkClient.enqueue(sampleBuffer)
+        decodedFrameCancellable = Task {
+            await bindStreamServerCore()
+            guard !Task.isCancelled else {
+                return
+            }
+            
+            let stream = sharedFrameProvider
+                .map { H264Decoder.SendableSampleBuffer(value: $0) }
+                .values
+            
+            for await bufferWrapper in stream {
+                await sinkClient.enqueue(bufferWrapper)
+                
+                guard !Task.isCancelled else {
+                    return
                 }
             }
-
-        Task { [weak self] in
-            await self?.bindStreamServerCore()
         }
     }
     
@@ -145,14 +160,14 @@ final class ServerManager: @unchecked Sendable {
             unbindCore()
         }
         
-        resetDecoder()
         Task {
+            await decoder.reset()
             await stopCore()
         }
     }
     
     private func unbindCore() {
-        decodedFrameCancellable = nil
+        decodedFrameCancellable?.cancel()
         Task {
             await streamServer.setFrameHandler(nil)
             await streamServer.setStreamUnavailableHandler(nil)
@@ -162,6 +177,6 @@ final class ServerManager: @unchecked Sendable {
 
 extension ServerManager: PreviewDecodedFrameProvidable {
     nonisolated func decodedFrameSubject() -> AnyPublisher<CMSampleBuffer, Never> {
-        sharedFrameProvider
+        frameProvider()
     }
 }

@@ -45,7 +45,7 @@ public actor H264Decoder {
         }
     }
 
-    private func reset() {
+    public func reset() {
         resetForStreamCore()
     }
 
