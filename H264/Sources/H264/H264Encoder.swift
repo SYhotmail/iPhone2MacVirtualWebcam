@@ -87,7 +87,7 @@ public actor H264Encoder {
                 return
             }
 
-            Task { @concurrent [weak self] in
+            Task { @concurrent [weak self = self] in
                 guard let self else {
                     return
                 }
