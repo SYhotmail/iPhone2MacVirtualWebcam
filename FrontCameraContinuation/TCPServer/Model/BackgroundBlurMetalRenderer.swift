@@ -5,7 +5,7 @@ import MetalPerformanceShaders
 import Vision
 
 nonisolated
-final class BackgroundBlurMetalRenderer {
+final class BackgroundBlurMetalRenderer: @unchecked Sendable {
     private let device: MTLDevice?
     private let commandQueue: MTLCommandQueue?
     private let yuvToBGRAPipeline: MTLComputePipelineState?
@@ -22,6 +22,8 @@ final class BackgroundBlurMetalRenderer {
     private var maskConfiguration: PoolConfiguration?
 
     private var backgroundTexture: MTLTexture?
+    private var backgroundTextureGeneration: UInt64 = 0
+    private let textureLoadingQueue = DispatchQueue(label: "BackgroundBlurMetalRenderer.textureLoading", qos: .utility)
 
     init() {
         let device = MTLCreateSystemDefaultDevice()
@@ -65,14 +67,32 @@ final class BackgroundBlurMetalRenderer {
 
     func setBackgroundImage(_ image: NSImage?) {
         lock.lock()
-        defer { lock.unlock() }
+        backgroundTextureGeneration &+= 1
+        let generation = backgroundTextureGeneration
+        lock.unlock()
 
         guard let device, let image else {
-            backgroundTexture = nil
+            updateBackgroundTexture(nil, generation: generation)
             return
         }
 
-        backgroundTexture = createTexture(from: image, device: device)
+        // Decoding the image (`NSImage.cgImage`) waits on ImageIO work running at a lower QoS.
+        // Doing it on the caller's (main, user-interactive) thread causes a priority inversion,
+        // so build the texture on a background queue and publish it under the lock afterwards.
+        textureLoadingQueue.async { [weak self] in
+            guard let self else { return }
+            let texture = self.createTexture(from: image, device: device)
+            self.updateBackgroundTexture(texture, generation: generation)
+        }
+    }
+
+    private func updateBackgroundTexture(_ texture: MTLTexture?, generation: UInt64) {
+        lock.lock()
+        defer { lock.unlock() }
+
+        // Drop results from stale requests superseded by a newer `setBackgroundImage` call.
+        guard generation == backgroundTextureGeneration else { return }
+        backgroundTexture = texture
     }
 
     private func createTexture(from image: NSImage, device: MTLDevice) -> MTLTexture? {
