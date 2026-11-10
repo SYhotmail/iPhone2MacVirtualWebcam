@@ -11,7 +11,15 @@ actor VirtualCameraSinkClient {
     private var deviceID: CMIODeviceID?
     private var sinkStreamID: CMIOStreamID?
     private var sinkQueue: CMSimpleQueue?
-    private var readyToEnqueue = true
+
+    /// When the sink queue became full and stopped draining. Used to detect a dead
+    /// consumer (extension restarted/upgraded/crashed) so we can reconnect instead of
+    /// stalling forever.
+    private var queueFullSince: ContinuousClock.Instant?
+    private var lastConnectAttempt: ContinuousClock.Instant?
+
+    private static let stallTimeout: Duration = .seconds(1)
+    private static let reconnectInterval: Duration = .seconds(1)
 
     func start() async {
         logger.debug("Starting virtual camera sink client")
@@ -24,47 +32,106 @@ actor VirtualCameraSinkClient {
                 return
             }
             logger.debug("Camera access granted")
-            connectIfNeeded()
+            connectIfNeeded(force: true)
         }
     }
 
     func stop() {
         logger.debug("Stopping virtual camera sink client")
+        disconnect()
+        lastConnectAttempt = nil
+    }
+
+    func enqueue(_ sampleBuffer: H264Decoder.SendableSampleBuffer) {
+        connectIfNeeded()
+        guard let sinkQueue else { return }
+
+        // The CMIO DAL drains this queue when the extension consumes a buffer, so the
+        // queue count is the source of truth for back-pressure. Relying solely on the
+        // "queue altered" callback can deadlock if a single callback is missed.
+        guard CMSimpleQueueGetCount(sinkQueue) < CMSimpleQueueGetCapacity(sinkQueue) else {
+            handleFullQueue()
+            return
+        }
+        queueFullSince = nil
+
+        guard let imageBuffer = sampleBuffer.value.imageBuffer,
+              let outputSampleBuffer = Self.makeSinkSampleBuffer(from: imageBuffer) else {
+            logger.debug("Unable to build sink sample buffer")
+            return
+        }
+
+        // Ownership of the retained buffer is transferred to the queue; the CMIO DAL
+        // releases it after handing it to the extension.
+        let retainedSampleBuffer = Unmanaged.passRetained(outputSampleBuffer)
+        let status = CMSimpleQueueEnqueue(sinkQueue, element: retainedSampleBuffer.toOpaque())
+        guard status == noErr else {
+            retainedSampleBuffer.release()
+            logger.debug("Failed to enqueue sample buffer, status=\(status)")
+            return
+        }
+    }
+
+    private func handleFullQueue() {
+        let now = ContinuousClock.now
+        guard let queueFullSince else {
+            self.queueFullSince = now
+            return
+        }
+        guard now - queueFullSince > Self.stallTimeout else { return }
+
+        logger.error("Sink queue stopped draining, reconnecting to virtual camera")
+        disconnect()
+    }
+
+    private func disconnect() {
         if let deviceID, let sinkStreamID {
             CMIODeviceStopStream(deviceID, sinkStreamID)
             logger.debug("Stopped sink stream \(sinkStreamID)")
         }
 
+        if let sinkQueue {
+            // Release buffers we still own because nobody dequeued them.
+            while let element = CMSimpleQueueDequeue(sinkQueue) {
+                Unmanaged<CMSampleBuffer>.fromOpaque(element).release()
+            }
+        }
+
         deviceID = nil
         sinkStreamID = nil
         sinkQueue = nil
-        readyToEnqueue = true
+        queueFullSince = nil
     }
 
-    
-    func enqueue(_ sampleBuffer: H264Decoder.SendableSampleBuffer) {
-        connectIfNeeded()
-        guard readyToEnqueue else { return }
-        guard let sinkQueue else { return }
-        guard CMSimpleQueueGetCount(sinkQueue) < CMSimpleQueueGetCapacity(sinkQueue) else { return }
-
-        readyToEnqueue = false
-        
-        let imageBuffer = sampleBuffer.value.imageBuffer
-        
-        let sampleBuffer = imageBuffer.flatMap { H264Decoder.makeSampleBuffer(from: $0) }
-        let retainedSampleBuffer = Unmanaged.passRetained(sampleBuffer!) // TODO: fix me...
-        let status = CMSimpleQueueEnqueue(sinkQueue, element: retainedSampleBuffer.toOpaque())
-        let success = status == noErr
-        readyToEnqueue = !success
-        guard success else {
-            readyToEnqueue = true
-            retainedSampleBuffer.release()
-            logger.debug("Failed to enqueue sample buffer, status=\(status)")
-            return
+    /// Builds a fresh sample buffer stamped with the current host time so the
+    /// extension forwards it with an up-to-date `hostTimeInNanoseconds`.
+    private static func makeSinkSampleBuffer(from pixelBuffer: CVPixelBuffer) -> CMSampleBuffer? {
+        var formatDescription: CMFormatDescription?
+        guard CMVideoFormatDescriptionCreateForImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescriptionOut: &formatDescription
+        ) == noErr, let formatDescription else {
+            return nil
         }
-        
-        logger.debug("Enqueued sample buffer to sink stream \(self.sinkStreamID ?? 0)")
+
+        var timingInfo = CMSampleTimingInfo(
+            duration: VirtualCameraConfiguration.frameDuration,
+            presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
+            decodeTimeStamp: .invalid
+        )
+
+        var sampleBuffer: CMSampleBuffer?
+        guard CMSampleBufferCreateReadyWithImageBuffer(
+            allocator: kCFAllocatorDefault,
+            imageBuffer: pixelBuffer,
+            formatDescription: formatDescription,
+            sampleTiming: &timingInfo,
+            sampleBufferOut: &sampleBuffer
+        ) == noErr else {
+            return nil
+        }
+        return sampleBuffer
     }
 
     @discardableResult
@@ -72,7 +139,7 @@ actor VirtualCameraSinkClient {
         let status = AVCaptureDevice.authorizationStatus(for: mediaType)
         switch status {
         case .authorized:
-            connectIfNeeded()
+            connectIfNeeded(force: true)
         case .notDetermined:
             logger.debug("Requesting camera access for virtual camera discovery")
         case .denied:
@@ -85,8 +152,13 @@ actor VirtualCameraSinkClient {
         return status
     }
 
-    private func connectIfNeeded() {
+    private func connectIfNeeded(force: Bool = false) {
         guard sinkQueue == nil else { return }
+        let now = ContinuousClock.now
+        if !force, let lastConnectAttempt, now - lastConnectAttempt < Self.reconnectInterval {
+            return
+        }
+        lastConnectAttempt = now
         logger.debug("Attempting sink connection")
         guard let match = findVirtualCamera() else {
             logger.debug("Unable to find a virtual camera device for sink connection")
@@ -104,21 +176,12 @@ actor VirtualCameraSinkClient {
             queuePointer.deallocate()
         }
 
-        let refCon = UnsafeMutableRawPointer(Unmanaged.passUnretained(self).toOpaque())
         let status = CMIOStreamCopyBufferQueue(
             sinkStreamID,
-            { _, token, refCon in
-                guard let refCon else { return }
-                let sinkClient = Unmanaged<VirtualCameraSinkClient>.fromOpaque(refCon).takeUnretainedValue()
-                Task { [sinkClient] in
-                    await sinkClient.markReadyToEnqueue()
-                }
-                
-                /*if let token { // TODO: fix me.
-                    Unmanaged<CMSampleBuffer>.fromOpaque(token).release()
-                }*/
+            { _, _, _ in
+                // Back-pressure is handled by checking the queue count in `enqueue`.
             },
-            refCon,
+            nil,
             queuePointer
         )
 
@@ -139,13 +202,8 @@ actor VirtualCameraSinkClient {
         self.deviceID = cmioDeviceID
         self.sinkStreamID = sinkStreamID
         self.sinkQueue = queue
-        self.readyToEnqueue = true
+        self.queueFullSince = nil
         logger.debug("Connected sink client to device \(cmioDeviceID), sink stream \(sinkStreamID), name=\(device.localizedName, privacy: .public)")
-    }
-
-    private func markReadyToEnqueue() {
-        readyToEnqueue = true
-        logger.debug("Sink stream is ready for another sample buffer")
     }
 
     private func findDevice(named name: String) -> AVCaptureDevice? {

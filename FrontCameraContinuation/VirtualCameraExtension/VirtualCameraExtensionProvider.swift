@@ -17,6 +17,9 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
     private var streamingCounter: UInt32 = 0
     private var streamingSinkCounter: UInt32 = 0
     private var sinkStarted = false
+    /// Incremented on every sink start/stop so that only one consume loop is alive.
+    private var sinkGeneration: UInt64 = 0
+    private let consumeQueue = DispatchQueue(label: "by.sy.TCPServer.Cam2Mac.sink-consume")
     
     private let lock = Mutex(())
     
@@ -116,20 +119,23 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
     private func startStreamingSinkCore() {
         streamingSinkCounter += 1
         sinkStarted = true
+        sinkGeneration &+= 1
         logger.error("Sink stream started. count=\(self.streamingSinkCounter)")
     }
     
     func startStreamingSink(client: CMIOExtensionClient) {
-        lock.withLock { _ in
+        let generation = lock.withLock { _ in
             startStreamingSinkCore()
+            return sinkGeneration
         }
-        
-        consumeBuffers(from: client)
+
+        consumeBuffers(from: client, generation: generation)
     }
     
 
     private func stopStreamingSinkCore() {
         sinkStarted = false
+        sinkGeneration &+= 1
         if streamingSinkCounter > 1 {
             streamingSinkCounter -= 1
         } else {
@@ -150,48 +156,54 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
         }
     }
     
-    var isSinkStarted: Bool {
+    private func isSinkActive(generation: UInt64) -> Bool {
         lock.withLock { _ in
-            sinkStarted
+            sinkStarted && sinkGeneration == generation
         }
     }
     
-    private func handleSampleBufferConsumption(_ sampleBuffer: CMSampleBuffer?,
-                                               sequenceNumber: UInt64) {
-        guard let sampleBuffer else {
-            logger.error("Sink consume returned nil sample buffer")
-            return
-        }
-
+    private func forwardToSource(_ sampleBuffer: CMSampleBuffer, sequenceNumber: UInt64) {
         let hostTimeInNanoseconds = UInt64(sampleBuffer.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
-        logger.error("Consumed sink sample buffer seq=\(sequenceNumber) host=\(hostTimeInNanoseconds)")
         let scheduledOutput = CMIOExtensionScheduledOutput(
             sequenceNumber: sequenceNumber,
             hostTimeInNanoseconds: hostTimeInNanoseconds
         )
 
-        let stream = streamSource.stream
+        guard let stream = streamSource.stream else { return }
         if hasStreamingCounter {
-            stream?.send(
+            stream.send(
                 sampleBuffer,
                 discontinuity: [],
                 hostTimeInNanoseconds: hostTimeInNanoseconds
             )
-            logger.error("Forwarded sink sample buffer to source seq=\(sequenceNumber)")
-        } else {
-            logger.error("Dropped sink sample buffer because source stream is inactive")
         }
-        
-        stream?.notifyScheduledOutputChanged(scheduledOutput)
+
+        streamSink.stream.notifyScheduledOutputChanged(scheduledOutput)
     }
 
-    private func consumeBuffers(from client: CMIOExtensionClient) {
-        guard isSinkStarted else { return }
+    private func consumeBuffers(from client: CMIOExtensionClient, generation: UInt64) {
+        guard isSinkActive(generation: generation) else { return }
 
-        streamSink.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, _, _, _ in
+        streamSink.stream.consumeSampleBuffer(from: client) { [weak self] sampleBuffer, sequenceNumber, _, _, error in
             guard let self else { return }
-            self.handleSampleBufferConsumption(sampleBuffer, sequenceNumber: sequenceNumber)
-            self.consumeBuffers(from: client)
+            guard self.isSinkActive(generation: generation) else { return }
+
+            if let sampleBuffer {
+                self.forwardToSource(sampleBuffer, sequenceNumber: sequenceNumber)
+                self.consumeQueue.async {
+                    self.consumeBuffers(from: client, generation: generation)
+                }
+            } else {
+                // No buffer queued yet (or a transient error): back off instead of
+                // spinning, then try again.
+                if let error {
+                    self.logger.debug("Sink consume failed: \(error.localizedDescription, privacy: .public)")
+                }
+                let delay = VirtualCameraConfiguration.frameDuration.seconds / 2
+                self.consumeQueue.asyncAfter(deadline: .now() + delay) {
+                    self.consumeBuffers(from: client, generation: generation)
+                }
+            }
         }
     }
 }
