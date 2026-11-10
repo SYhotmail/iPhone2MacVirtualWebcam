@@ -20,6 +20,15 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
     /// Incremented on every sink start/stop so that only one consume loop is alive.
     private var sinkGeneration: UInt64 = 0
     private let consumeQueue = DispatchQueue(label: "by.sy.TCPServer.Cam2Mac.sink-consume")
+
+    /// Small jitter buffer between the sink (bursty network arrival) and the source
+    /// (steady frame cadence). Frames that arrive back-to-back are spread over
+    /// consecutive ticks instead of being shown at once / overwritten.
+    private var pendingFrames: [CMSampleBuffer] = []
+    private static let maxPendingFrames = 3
+    private var outputTimer: DispatchSourceTimer?
+    /// Consecutive ticks with more than one spare frame queued (sustained backlog).
+    private var backlogTicks = 0
     
     private let lock = Mutex(())
     
@@ -124,11 +133,12 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
     }
     
     func startStreamingSink(client: CMIOExtensionClient) {
-        let generation = lock.withLock { _ in
+        let generation = lock.withLock { _ -> UInt64 in
             startStreamingSinkCore()
             return sinkGeneration
         }
 
+        startOutputTimer()
         consumeBuffers(from: client, generation: generation)
     }
     
@@ -145,8 +155,17 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
     }
     
     func stopStreamingSink() {
-        lock.withLock { _ in
+        let shouldStopTimer = lock.withLock { _ -> Bool in
             stopStreamingSinkCore()
+            if streamingSinkCounter == 0 {
+                pendingFrames.removeAll()
+                backlogTicks = 0
+                return true
+            }
+            return false
+        }
+        if shouldStopTimer {
+            stopOutputTimer()
         }
     }
     
@@ -162,23 +181,98 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
         }
     }
     
-    private func forwardToSource(_ sampleBuffer: CMSampleBuffer, sequenceNumber: UInt64) {
-        let hostTimeInNanoseconds = UInt64(sampleBuffer.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
-        let scheduledOutput = CMIOExtensionScheduledOutput(
-            sequenceNumber: sequenceNumber,
-            hostTimeInNanoseconds: hostTimeInNanoseconds
-        )
-
-        guard let stream = streamSource.stream else { return }
-        if hasStreamingCounter {
-            stream.send(
-                sampleBuffer,
-                discontinuity: [],
-                hostTimeInNanoseconds: hostTimeInNanoseconds
-            )
+    private func enqueuePendingFrame(_ sampleBuffer: CMSampleBuffer, sequenceNumber: UInt64) {
+        lock.withLock { _ in
+            pendingFrames.append(sampleBuffer)
+            if pendingFrames.count > Self.maxPendingFrames {
+                pendingFrames.removeFirst(pendingFrames.count - Self.maxPendingFrames)
+            }
         }
 
-        streamSink.stream.notifyScheduledOutputChanged(scheduledOutput)
+        let hostTimeInNanoseconds = UInt64(sampleBuffer.presentationTimeStamp.seconds * Double(NSEC_PER_SEC))
+        streamSink.stream.notifyScheduledOutputChanged(
+            CMIOExtensionScheduledOutput(sequenceNumber: sequenceNumber,
+                                         hostTimeInNanoseconds: hostTimeInNanoseconds)
+        )
+    }
+
+    private struct PendingFrame: @unchecked Sendable {
+        let sampleBuffer: CMSampleBuffer
+    }
+
+    private func dequeuePendingFrame() -> CMSampleBuffer? {
+        let frame = lock.withLock { _ -> PendingFrame? in
+            guard streamingCounter > 0, !pendingFrames.isEmpty else { return nil }
+            // Short bursts are absorbed and played out one per tick. Only when a
+            // backlog persists for ~1s (sender clock slightly faster than ours) skip a
+            // frame, so latency doesn't keep growing.
+            if pendingFrames.count > 1 {
+                backlogTicks += 1
+                if backlogTicks >= VirtualCameraConfiguration.frameRate {
+                    pendingFrames.removeFirst()
+                    backlogTicks = 0
+                }
+            } else {
+                backlogTicks = 0
+            }
+            return PendingFrame(sampleBuffer: pendingFrames.removeFirst())
+        }
+        return frame?.sampleBuffer
+    }
+
+    private func startOutputTimer() {
+        consumeQueue.async { [weak self] in
+            guard let self, self.outputTimer == nil else { return }
+            let timer = DispatchSource.makeTimerSource(flags: .strict, queue: self.consumeQueue)
+            let interval = VirtualCameraConfiguration.frameDuration.seconds
+            timer.schedule(deadline: .now() + interval,
+                           repeating: interval,
+                           leeway: .milliseconds(1))
+            timer.setEventHandler { [weak self] in
+                self?.emitNextFrame()
+            }
+            self.outputTimer = timer
+            timer.resume()
+        }
+    }
+
+    private func stopOutputTimer() {
+        consumeQueue.async { [weak self] in
+            self?.outputTimer?.cancel()
+            self?.outputTimer = nil
+        }
+    }
+
+    /// Called on `consumeQueue` once per frame duration.
+    private func emitNextFrame() {
+        guard let sampleBuffer = dequeuePendingFrame(),
+              let stream = streamSource.stream else {
+            return
+        }
+
+        // Re-stamp with the actual output time so consumers see an evenly spaced,
+        // monotonic timeline.
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        var timing = CMSampleTimingInfo(
+            duration: VirtualCameraConfiguration.frameDuration,
+            presentationTimeStamp: now,
+            decodeTimeStamp: .invalid
+        )
+        var retimed: CMSampleBuffer?
+        let status = CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: 1,
+            sampleTimingArray: &timing,
+            sampleBufferOut: &retimed
+        )
+        let output = (status == noErr ? retimed : nil) ?? sampleBuffer
+
+        stream.send(
+            output,
+            discontinuity: [],
+            hostTimeInNanoseconds: UInt64(now.seconds * Double(NSEC_PER_SEC))
+        )
     }
 
     private func consumeBuffers(from client: CMIOExtensionClient, generation: UInt64) {
@@ -189,7 +283,7 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
             guard self.isSinkActive(generation: generation) else { return }
 
             if let sampleBuffer {
-                self.forwardToSource(sampleBuffer, sequenceNumber: sequenceNumber)
+                self.enqueuePendingFrame(sampleBuffer, sequenceNumber: sequenceNumber)
                 self.consumeQueue.async {
                     self.consumeBuffers(from: client, generation: generation)
                 }
@@ -199,7 +293,8 @@ final class VirtualCameraExtensionDeviceSource: NSObject, @unchecked Sendable, C
                 if let error {
                     self.logger.debug("Sink consume failed: \(error.localizedDescription, privacy: .public)")
                 }
-                let delay = VirtualCameraConfiguration.frameDuration.seconds / 2
+                // Poll often enough that a queued frame waits only a few ms.
+                let delay = 0.004
                 self.consumeQueue.asyncAfter(deadline: .now() + delay) {
                     self.consumeBuffers(from: client, generation: generation)
                 }
@@ -321,7 +416,9 @@ final class VirtualCameraExtensionSinkStream: NSObject, CMIOExtensionStreamSourc
             streamProperties.frameDuration = VirtualCameraConfiguration.frameDuration
         }
         if properties.contains(.streamSinkBufferQueueSize) {
-            streamProperties.sinkBufferQueueSize = 1
+            // Room for a burst of frames from the network so none are dropped
+            // before the extension reads them.
+            streamProperties.sinkBufferQueueSize = 4
         }
         if properties.contains(.streamSinkBuffersRequiredForStartup) {
             streamProperties.sinkBuffersRequiredForStartup = 1

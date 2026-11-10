@@ -29,20 +29,47 @@ public actor H264Decoder {
         decodedFramePublisher.eraseToAnyPublisher()
     }
 
+    private enum Command: Sendable {
+        case decode(Data)
+        case reset
+    }
+
+    /// Serial FIFO of work. Spawning a separate `Task` per frame does not guarantee
+    /// the actor runs them in arrival order, and H.264 frames decoded out of order
+    /// show up as dropped/jumping frames during motion.
+    nonisolated private let commands: AsyncStream<Command>.Continuation
+
     public init() {
         self.streamDiagnostics = .shared
+        let (stream, continuation) = AsyncStream.makeStream(of: Command.self, bufferingPolicy: .unbounded)
+        self.commands = continuation
+        Task { [weak self] in
+            for await command in stream {
+                guard let self else { return }
+                await self.handle(command)
+            }
+        }
+    }
+
+    deinit {
+        commands.finish()
+    }
+
+    private func handle(_ command: Command) {
+        switch command {
+        case .decode(let data):
+            decode(data)
+        case .reset:
+            reset()
+        }
     }
 
     nonisolated public func scheduleToDecode(_ data: Data) {
-        Task { [weak self, data] in
-            await self?.decode(data)
-        }
+        commands.yield(.decode(data))
     }
 
     nonisolated public func scheduleToReset() {
-        Task { [weak self] in
-            await self?.reset()
-        }
+        commands.yield(.reset)
     }
 
     public func reset() {
@@ -280,11 +307,10 @@ public actor H264Decoder {
         guard let sampleBuffer = makeSampleBuffer(from: imageBuffer) else {
             return
         }
-        let value = SendableSampleBuffer(value: sampleBuffer)
-
-        Task { @concurrent in
-            await decoder.handleDecodedFrame(value)
-        }
+        // Publish synchronously from the VideoToolbox callback so frames keep their
+        // decode order (a Task per frame can reorder them).
+        decoder.streamDiagnostics.mark(.decodeOutput)
+        decoder.decodedFramePublisher.send(SendableSampleBuffer(value: sampleBuffer))
     }
 
     nonisolated
@@ -390,11 +416,6 @@ public actor H264Decoder {
         }
 
         return nalUnits
-    }
-
-    private func handleDecodedFrame(_ sampleBuffer: sending SendableSampleBuffer) {
-        streamDiagnostics.mark(.decodeOutput)
-        decodedFramePublisher.send(sampleBuffer)
     }
 }
 
