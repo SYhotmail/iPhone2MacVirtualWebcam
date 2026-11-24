@@ -33,14 +33,27 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
     let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(.idle)
     let isStreamingRequestedPublisher = CurrentValueSubject<Bool, Never>(false)
+    /// Encoded packets in encoder order; one consumer sends them so H.264 order is kept on the wire.
+    private let outgoingPackets: AsyncStream<Data>.Continuation
     
     var session: AVCaptureSession {
         captureSessionManager.session
     }
 
     init(tlsConfiguration: TLSConfiguration = .default) throws {
-        self.streamClient = FrameStreamClient(transport: tlsConfiguration.transport)
+        let streamClient = FrameStreamClient(transport: tlsConfiguration.transport)
+        self.streamClient = streamClient
+        let (packets, continuation) = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .unbounded)
+        self.outgoingPackets = continuation
         super.init()
+        Task { [weak self] in
+            for await packet in packets {
+                guard let self, !Task.isCancelled else {
+                    return
+                }
+                await self.streamClient.send(packet)
+            }
+        }
         
         encoder = .init(
             expectedFrameRate: VirtualCameraConfiguration.frameRate,
@@ -52,6 +65,10 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         bind()
     }
     
+    deinit {
+        outgoingPackets.finish()
+    }
+
     private func bind() {
         bindConnectionManager()
         
@@ -127,9 +144,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
 
     private func send(_ data: Data) {
-        Task {
-            await streamClient.send(data)
-        }
+        outgoingPackets.yield(data)
     }
 
     private func handleSessionInterrupted(_ reason: AVCaptureSession.InterruptionReason?) {

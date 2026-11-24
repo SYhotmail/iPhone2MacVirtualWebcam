@@ -53,14 +53,14 @@ struct ContentView: View {
             "Pair with \(viewModel.invitationToConfirm?.serviceName ?? "Mac")?",
             isPresented: Binding(
                 get: { viewModel.invitationToConfirm != nil },
-                set: { if !$0 { viewModel.invitationToConfirm = nil } }
+                set: { if !$0 { viewModel.cancelPairingConfirmation() } }
             ),
             presenting: viewModel.invitationToConfirm
         ) { invitation in
             Button("Pair") {
                 viewModel.confirmPairing(invitation)
             }
-            Button("Cancel", role: .cancel) {}
+            Button("Cancel", role: .cancel, action: viewModel.cancelPairingConfirmation)
         } message: { _ in
             Text("This iPhone will send its camera feed to this Mac. Only pair with a Mac you own.")
         }

@@ -360,6 +360,15 @@ final class ContentViewModel {
         }
     }
 
+    /// The user declined a scanned code; restart the camera the scanner had released.
+    func cancelPairingConfirmation() {
+        guard invitationToConfirm != nil else {
+            return
+        }
+        invitationToConfirm = nil
+        preparePreview()
+    }
+
     /// Registers this iPhone with the confirmed Mac by connecting with the one-time token.
     func confirmPairing(_ invitation: PairingInvitation) {
         invitationToConfirm = nil

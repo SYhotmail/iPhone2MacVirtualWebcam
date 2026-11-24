@@ -23,6 +23,15 @@ public actor H264Encoder {
 
     private let outputHandler: OutputHandler
 
+    private enum Command: Sendable {
+        case encode(SendableImageBuffer, size: CGSize)
+        case invalidate
+    }
+
+    /// Serial FIFO of work. A `Task` per frame does not run in arrival order, which
+    /// interleaves old- and new-size frames on rotation and reorders packets.
+    nonisolated private let commands: AsyncStream<Command>.Continuation
+
     public init(
         expectedFrameRate: Int = 30,
         maxKeyInterval: Int = 30,
@@ -32,21 +41,37 @@ public actor H264Encoder {
         self.expectedFrameRate = expectedFrameRate
         self.maxKeyInterval = maxKeyInterval
         self.outputHandler = outputHandler
+        let (stream, continuation) = AsyncStream.makeStream(of: Command.self, bufferingPolicy: .unbounded)
+        self.commands = continuation
+        Task { @concurrent [weak self] in
+            for await command in stream {
+                guard let self, !Task.isCancelled else { return }
+                await self.handle(command)
+            }
+        }
+    }
+
+    deinit {
+        commands.finish()
+    }
+
+    private func handle(_ command: Command) {
+        switch command {
+        case let .encode(imageBuffer, size):
+            encode(imageBuffer, newSize: size)
+        case .invalidate:
+            invalidate()
+        }
     }
 
     nonisolated public func scheduleToEncode(imageBuffer: CVImageBuffer) {
         let width = CVPixelBufferGetWidth(imageBuffer)
         let height = CVPixelBufferGetHeight(imageBuffer)
-        let size = CGSize(width: width, height: height)
-        let sendableImageBuffer = SendableImageBuffer(value: imageBuffer)
-
-        Task { @concurrent [sendableImageBuffer] in
-            await self.encode(sendableImageBuffer, newSize: size)
-        }
+        commands.yield(.encode(SendableImageBuffer(value: imageBuffer), size: CGSize(width: width, height: height)))
     }
 
     @discardableResult
-    private func encode(_ imageBuffer: sending SendableImageBuffer, newSize: CGSize) -> Bool {
+    private func encode(_ imageBuffer: SendableImageBuffer, newSize: CGSize) -> Bool {
         guard let session = compressionSession(newSize: newSize) else {
             return false
         }
@@ -61,6 +86,7 @@ public actor H264Encoder {
             : nil
 
         let firstParam = !sentConfig
+        let outputHandler = outputHandler
 
         let res = VTCompressionSessionEncodeFrame(
             session,
@@ -87,25 +113,15 @@ public actor H264Encoder {
                 return
             }
 
-            Task { @concurrent [weak self = self] in
-                guard let self else {
-                    return
-                }
-                assert(!Thread.isMainThread)
-
-                outputHandler(packetData)
-
-                if firstParam {
-                    await setSentConfig(true)
-                }
-            }
+            // VideoToolbox calls this in decode order for a session; deliver
+            // synchronously so packets keep that order.
+            outputHandler(packetData)
         }
 
+        if res == noErr {
+            sentConfig = true
+        }
         return res == noErr
-    }
-
-    private func setSentConfig(_ sentConfig: Bool) {
-        self.sentConfig = sentConfig
     }
 
     private func invalidate() {
@@ -127,9 +143,7 @@ public actor H264Encoder {
     }
 
     nonisolated public func scheduleToInvalidate() {
-        Task { @concurrent [weak self] in
-            await self?.invalidate()
-        }
+        commands.yield(.invalidate)
     }
 
     private func compressionSession(newSize: CGSize) -> VTCompressionSession? {
