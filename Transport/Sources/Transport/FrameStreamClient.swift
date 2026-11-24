@@ -1,13 +1,49 @@
 import Foundation
 import Network
 
-/// Sends packetized frame data to a remote receiver over the configured network transport.
+/// Sends packetized frame data to a paired receiver over the configured network transport.
+///
+/// After the transport becomes ready the client sends a `PairingHello` and only reports
+/// `.connected` once the receiver accepts it.
 public actor FrameStreamClient {
     public enum Status: Equatable, Sendable {
         case idle
         case connecting
         case connected
         case failed
+        /// The receiver refused the pairing credentials; reconnecting will not help.
+        case rejected(reason: String?)
+    }
+
+    /// Where to connect and how to authenticate.
+    public struct Destination: Sendable, Equatable {
+        public var endpoint: NWEndpoint
+        /// SHA-256 of the receiver certificate to pin.
+        public var pinnedFingerprint: Data
+        public var hello: PairingHello
+
+        public init(endpoint: NWEndpoint, pinnedFingerprint: Data, hello: PairingHello) {
+            self.endpoint = endpoint
+            self.pinnedFingerprint = pinnedFingerprint
+            self.hello = hello
+        }
+
+        /// A receiver advertised over Bonjour under `serviceName`.
+        public static func service(named serviceName: String, pinnedFingerprint: Data, hello: PairingHello) -> Self {
+            .init(
+                endpoint: .service(name: serviceName, type: FrameStreamService.type, domain: FrameStreamService.domain, interface: nil),
+                pinnedFingerprint: pinnedFingerprint,
+                hello: hello
+            )
+        }
+
+        /// A receiver at a fixed address; returns `nil` for an invalid port.
+        public static func host(_ host: String, port: UInt16, pinnedFingerprint: Data, hello: PairingHello) -> Self? {
+            guard let nwPort = NWEndpoint.Port(rawValue: port) else {
+                return nil
+            }
+            return .init(endpoint: .hostPort(host: .init(host), port: nwPort), pinnedFingerprint: pinnedFingerprint, hello: hello)
+        }
     }
 
     private var connection: (any TransportConnection)? {
@@ -18,13 +54,11 @@ public actor FrameStreamClient {
             oldValue.cancel()
         }
     }
-    
-    typealias TransportConnectionFactory = @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> any TransportConnection
-    public typealias NWConnectionFactory = @Sendable (NWEndpoint.Host, NWEndpoint.Port) -> NWConnection
-    
+
+    typealias TransportConnectionFactory = @Sendable (Destination) -> any TransportConnection
+
     private var connectionID: ObjectIdentifier?
-    private var currentHost: String?
-    private var currentPort: UInt16?
+    private var currentDestination: Destination?
     private let connectionFactory: TransportConnectionFactory
 
     private var status: Status = .idle {
@@ -46,31 +80,18 @@ public actor FrameStreamClient {
 
     private var onStatusChanged: (@Sendable (Status) -> Void)?
 
-    public init(transport: TransportNetworkProtocol = .tcp) {
-        let parameters = transport.nwParameters
-        let connectionBuilder: NWConnectionFactory = { host, port in
-            NWConnection(host: host, port: port, using: parameters)
-        }
-        
-        self.init(connectionBuilder: connectionBuilder)
-    }
-
-    public init(connectionBuilder: @escaping NWConnectionFactory) {
-        self.connectionFactory = { host, port in
-            NWConnectionAdapter(connection: connectionBuilder(host, port))
+    public init(transport: TransportNetworkProtocol = .commonQUIC) {
+        self.init { destination in
+            let parameters = TransportTLSParameters.makeClientParameters(
+                pinnedFingerprint: destination.pinnedFingerprint,
+                transport: transport
+            )
+            return NWConnectionAdapter(connection: NWConnection(to: destination.endpoint, using: parameters))
         }
     }
 
     init(connectionFactory: @escaping TransportConnectionFactory) {
         self.connectionFactory = connectionFactory
-    }
-
-    public static func accepts(port: UInt16) -> Bool {
-        newPort(port: port) != nil
-    }
-    
-    private static func newPort(port: UInt16) -> NWEndpoint.Port! {
-        NWEndpoint.Port(rawValue: port)
     }
 
     public func setConnectivityChangedHandler(_ handler: (@Sendable (Bool) -> Void)?) {
@@ -81,20 +102,12 @@ public actor FrameStreamClient {
         onStatusChanged = handler
     }
 
-    @discardableResult
-    public func connect(toHost host: String, port: UInt16) -> Bool {
-        guard let nwPort = Self.newPort(port: port) else {
-            status = .failed
-            return false
-        }
-
-        currentHost = host
-        currentPort = port
+    public func connect(to destination: Destination) {
+        currentDestination = destination
         connection = nil
         status = .connecting
 
-        let endpoint = NWEndpoint.Host(host)
-        let connection = connectionFactory(endpoint, nwPort)
+        let connection = connectionFactory(destination)
         let connectionID = ObjectIdentifier(connection)
         self.connectionID = connectionID
 
@@ -120,15 +133,15 @@ public actor FrameStreamClient {
 
         connection.start(queue: .global(qos: .userInitiated))
         self.connection = connection
-        return true
     }
 
     @discardableResult
     public func reconnect() -> Bool {
-        guard let currentHost, let currentPort else {
+        guard let currentDestination else {
             return false
         }
-        return connect(toHost: currentHost, port: currentPort)
+        connect(to: currentDestination)
+        return true
     }
 
     public func disconnect() {
@@ -140,8 +153,9 @@ public actor FrameStreamClient {
         connection = nil
     }
 
+    /// Sends a video frame; dropped until the receiver accepted the hello.
     public func send(_ data: Data) async {
-        guard let connection else {
+        guard let connection, status == .connected else {
             return
         }
 
@@ -153,8 +167,12 @@ public actor FrameStreamClient {
         }
     }
 
-    private func handleStateUpdate(_ newState: TransportConnectionState, sourceID: ObjectIdentifier) {
+    private func handleStateUpdate(_ newState: TransportConnectionState, sourceID: ObjectIdentifier) async {
         guard connectionID == sourceID else {
+            return
+        }
+        if case .rejected = status {
+            // The receiver closes the connection after rejecting; keep the rejection visible.
             return
         }
 
@@ -165,12 +183,43 @@ public actor FrameStreamClient {
             debugPrint("❌ Connection waiting error: \(error)")
             status = .failed
         case .ready:
-            status = .connected
+            await performHandshake(sourceID: sourceID)
         case .failed(let error):
             debugPrint("❌ Failed error: \(error)")
             status = .failed
         case .cancelled:
             status = .idle
+        }
+    }
+
+    private func performHandshake(sourceID: ObjectIdentifier) async {
+        guard let connection, let destination = currentDestination else {
+            return
+        }
+
+        let reply: PairingReply
+        do {
+            try await connection.send(content: FramePacket.packetized(JSONEncoder().encode(destination.hello)))
+            let payload = try await FramePacket.read(from: connection, maximumPayloadSize: PairingHello.maximumEncodedSize)
+            reply = try JSONDecoder().decode(PairingReply.self, from: payload)
+        } catch {
+            debugPrint("❌ Handshake failed: \(error)")
+            if connectionID == sourceID {
+                status = .failed
+            }
+            return
+        }
+
+        guard connectionID == sourceID else {
+            return
+        }
+
+        if reply.ok {
+            currentDestination?.hello = destination.hello.afterPairing
+            status = .connected
+        } else {
+            status = .rejected(reason: reply.reason)
+            self.connection = nil
         }
     }
 }

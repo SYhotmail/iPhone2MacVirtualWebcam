@@ -29,6 +29,10 @@ final class CameraPIPManager: NSObject {
         queueLabel: "by.sy.FrontCameraContinuation.CameraPIP.render"
     )
     private let audioSession: AVAudioSession
+    /// Serializes category changes and activation requests off the main thread.
+    private let audioSessionQueue = DispatchQueue(label: "by.sy.FrontCameraContinuation.CameraPIP.audio", qos: .userInitiated)
+    /// Last state requested from `audioSessionQueue`; only touched on the main thread.
+    private var isAudioSessionActive = false
     private var shouldStartWhenPossible = false
     private var frameObservation: AnyCancellable?
     
@@ -216,17 +220,50 @@ final class CameraPIPManager: NSObject {
     }
 
     private func updateAudioSession(isActive: Bool) {
-        do {
-            if isActive {
-                try audioSession.setCategory(
-                    .playAndRecord,
-                    mode: .videoChat,
-                    options: [.mixWithOthers, .defaultToSpeaker]
-                )
+        guard isActive != isAudioSessionActive else {
+            return
+        }
+        isAudioSessionActive = isActive
+
+        let audioSession = audioSession
+        audioSessionQueue.async {
+            do {
+                if isActive {
+                    try audioSession.setCategory(
+                        .playAndRecord,
+                        mode: .videoChat,
+                        options: [.mixWithOthers, .defaultToSpeaker]
+                    )
+                }
+            } catch {
+                debugPrint("Failed to configure audio session for PiP: \(error)")
+                return
             }
-            try audioSession.setActive(isActive)
-        } catch {
-            debugPrint("Failed to configure audio session for PiP: \(error)")
+            Self.setAudioSession(audioSession, isActive: isActive)
+        }
+    }
+
+    /// Prefers the non-blocking activate/deactivate API; older systems fall back to
+    /// `setActive`, which is safe here because callers run on `audioSessionQueue`.
+    nonisolated
+    private static func setAudioSession(_ audioSession: AVAudioSession, isActive: Bool) {
+        if #available(iOS 27.0, *) {
+            let completion: @Sendable (Bool, (any Error)?) -> Void = { _, error in
+                if let error {
+                    debugPrint("Failed to update audio session for PiP: \(error)")
+                }
+            }
+            if isActive {
+                audioSession.activate(completionHandler: completion)
+            } else {
+                audioSession.deactivate(completionHandler: completion)
+            }
+        } else {
+            do {
+                try audioSession.setActive(isActive)
+            } catch {
+                debugPrint("Failed to update audio session for PiP: \(error)")
+            }
         }
     }
 

@@ -9,7 +9,7 @@ struct FrameStreamServerTests {
     func startPropagatesListenerCreationFailures() async {
         struct ListenerCreationError: Error {}
 
-        let server = FrameStreamServer(listenerFactory: .init { _ in
+        let server = FrameStreamServer(listenerFactory: { _ in
             throw ListenerCreationError()
         })
 
@@ -27,12 +27,12 @@ struct FrameStreamServerTests {
     func readsCompleteFrameFromConnection() async throws {
         let listener = MockTransportListener()
         let connection = MockTransportConnection(
-            receiveResults: [
+            receiveResults: helloResults() + [
                 .success(Data([0x00, 0x00, 0x00, 0x03])),
                 .success(Data([0xAA, 0xBB, 0xCC])),
             ]
         )
-        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+        let server = await makeAcceptingServer(listener)
 
         let recorder = FrameRecorder()
         await server.setFrameHandler { data in
@@ -48,34 +48,35 @@ struct FrameStreamServerTests {
         let receivedFrame = await recorder.waitForFrame()
 
         #expect(receivedFrame == Data([0xAA, 0xBB, 0xCC]))
+        #expect(decodedReplies(connection) == [.accepted])
     }
 
     @Test
     func requestsEntireFramePayloadInSingleReceive() async throws {
         let listener = MockTransportListener()
         let connection = MockTransportConnection(
-            receiveResults: [
+            receiveResults: helloResults() + [
                 .success(Data([0x00, 0x00, 0x00, 0x03])),
                 .success(Data([0xAA, 0xBB, 0xCC])),
             ]
         )
-        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+        let server = await makeAcceptingServer(listener)
 
         try await server.start(on: 9999)
         listener.simulateNewConnection(connection)
         await waitForCondition { connection.startedQueues.count == 1 }
         connection.simulateState(.ready)
-        await waitForCondition { connection.receiveRequests.count >= 2 }
+        await waitForCondition { connection.receiveRequests.count >= 4 }
 
-        #expect(connection.receiveRequests[0] == .init(minimumIncompleteLength: 1, maximumLength: 4))
-        #expect(connection.receiveRequests[1] == .init(minimumIncompleteLength: 1, maximumLength: 3))
+        #expect(connection.receiveRequests[2] == .init(minimumIncompleteLength: 1, maximumLength: 4))
+        #expect(connection.receiveRequests[3] == .init(minimumIncompleteLength: 1, maximumLength: 3))
     }
 
     @Test
     func cancelConnectionsForceCancelsActiveConnections() async throws {
         let listener = MockTransportListener()
         let connection = MockTransportConnection(receiveResults: [])
-        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+        let server = FrameStreamServer(listenerFactory: { _ in listener })
 
         let recorder = StreamUnavailableRecorder()
         await server.setStreamUnavailableHandler {
@@ -97,14 +98,14 @@ struct FrameStreamServerTests {
     @Test
     func rejectsSecondConnectionWhileFirstClientIsStillStreaming() async throws {
         let listener = MockTransportListener()
-        var receiveResults = [Result<Data, Error>]()
+        var receiveResults = helloResults()
         for _ in 0..<128 {
             receiveResults.append(.success(Data([0x00, 0x00, 0x00, 0x03])))
             receiveResults.append(.success(Data([0xAA, 0xBB, 0xCC])))
         }
         let firstConnection = MockTransportConnection(receiveResults: receiveResults)
         let secondConnection = MockTransportConnection(receiveResults: [])
-        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+        let server = await makeAcceptingServer(listener)
         let recorder = FrameRecorder()
 
         await server.setFrameHandler { data in
@@ -133,7 +134,7 @@ struct FrameStreamServerTests {
         let listener = MockTransportListener()
         let firstConnection = MockTransportConnection(receiveResults: [])
         let secondConnection = MockTransportConnection(receiveResults: [])
-        let server = FrameStreamServer(listenerFactory: .init { _ in listener })
+        let server = FrameStreamServer(listenerFactory: { _ in listener })
 
         try await server.start(on: 9999)
         listener.simulateNewConnection(firstConnection)
@@ -148,6 +149,138 @@ struct FrameStreamServerTests {
         #expect(secondConnection.forceCancelCallCount == 0)
         #expect(secondConnection.startedQueues.count == 1)
     }
+
+    @Test
+    func readsHelloSplitAcrossManyReceives() async throws {
+        let listener = MockTransportListener()
+        let packet = FramePacket.packetized(try JSONEncoder().encode(validHello))
+        var results = packet.map { Result<Data, Error>.success(Data([$0])) }
+        results += [.success(Data([0x00, 0x00, 0x00, 0x01])), .success(Data([0x42]))]
+        let connection = MockTransportConnection(receiveResults: results)
+        let server = await makeAcceptingServer(listener)
+        let recorder = FrameRecorder()
+        await server.setFrameHandler { data in
+            Task { await recorder.store(data) }
+        }
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+
+        #expect(await recorder.waitForFrame() == Data([0x42]))
+    }
+
+    @Test
+    func rejectedHelloGetsReplyAndNoFramesAreDelivered() async throws {
+        let listener = MockTransportListener()
+        let badHello = PairingHello.hello(clientID: UUID(), secret: Data(repeating: 1, count: 32))
+        let connection = MockTransportConnection(
+            receiveResults: helloResults(badHello) + [
+                .success(Data([0x00, 0x00, 0x00, 0x01])),
+                .success(Data([0x42])),
+            ]
+        )
+        let server = await makeAcceptingServer(listener)
+        let recorder = FrameRecorder()
+        await server.setFrameHandler { data in
+            Task { await recorder.store(data) }
+        }
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { connection.cancelCallCount == 1 }
+
+        #expect(decodedReplies(connection) == [.rejected("bad secret")])
+        #expect(connection.cancelCallCount == 1)
+        #expect(await recorder.waitForFrame(timeoutNanoseconds: 50_000_000) == nil)
+    }
+
+    @Test
+    func rejectsEveryoneWithoutAuthorizer() async throws {
+        let listener = MockTransportListener()
+        let connection = MockTransportConnection(receiveResults: helloResults())
+        let server = FrameStreamServer(listenerFactory: { _ in listener })
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { connection.cancelCallCount == 1 }
+
+        #expect(decodedReplies(connection).first?.ok == false)
+    }
+
+    @Test
+    func closesConnectionSendingOversizedHello() async throws {
+        let listener = MockTransportListener()
+        let connection = MockTransportConnection(receiveResults: [.success(Data([0x00, 0x01, 0x00, 0x00]))])
+        let server = await makeAcceptingServer(listener)
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { connection.cancelCallCount == 1 }
+
+        #expect(connection.cancelCallCount == 1)
+        #expect(connection.sentPayloads.isEmpty)
+        #expect(connection.receiveRequests.count == 1)
+    }
+
+    @Test
+    func authenticatedButIdleConnectionDoesNotBlockNextClient() async throws {
+        let listener = MockTransportListener()
+        let firstConnection = MockTransportConnection(receiveResults: helloResults(), endsWhenEmpty: false)
+        let secondConnection = MockTransportConnection(receiveResults: [])
+        let server = await makeAcceptingServer(listener)
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(firstConnection)
+        await waitForCondition { firstConnection.startedQueues.count == 1 }
+        firstConnection.simulateState(.ready)
+        await waitForCondition { decodedReplies(firstConnection) == [.accepted] }
+
+        listener.simulateNewConnection(secondConnection)
+        await waitForCondition { secondConnection.startedQueues.count == 1 }
+
+        #expect(firstConnection.cancelCallCount == 1)
+        #expect(secondConnection.forceCancelCallCount == 0)
+    }
+
+    @Test
+    func advertisesBonjourServiceWhenNamed() async throws {
+        let listener = MockTransportListener()
+        let server = FrameStreamServer(listenerFactory: { _ in listener })
+
+        try await server.start(on: 9999, serviceName: "Studio Mac")
+        listener.serviceNameRegisteredHandler?("Studio Mac (2)")
+
+        #expect(listener.service?.name == "Studio Mac")
+        #expect(listener.service?.type == FrameStreamService.type)
+        #expect(server.state.advertisedServiceName.value == "Studio Mac (2)")
+    }
+}
+
+private let validHello = PairingHello.hello(clientID: UUID(), secret: Data(repeating: 7, count: 32))
+
+private func helloResults(_ hello: PairingHello = validHello) -> [Result<Data, Error>] {
+    let packet = FramePacket.packetized(try! JSONEncoder().encode(hello))
+    return [.success(packet.prefix(4)), .success(packet.dropFirst(4))]
+}
+
+private func makeAcceptingServer(_ listener: MockTransportListener) async -> FrameStreamServer {
+    let server = FrameStreamServer(listenerFactory: { _ in listener })
+    await server.setHelloAuthorizer { hello in
+        hello.secret == validHello.secret ? .accepted : .rejected("bad secret")
+    }
+    return server
+}
+
+private func decodedReplies(_ connection: MockTransportConnection) -> [PairingReply] {
+    connection.sentPayloads.compactMap { try? JSONDecoder().decode(PairingReply.self, from: $0.dropFirst(4)) }
 }
 
 private func waitForCondition(timeoutNanoseconds: UInt64 = 1_000_000_000, _ condition: @escaping @Sendable () -> Bool) async {
@@ -193,6 +326,8 @@ private final class MockTransportListener: @unchecked Sendable, TransportListene
     var state: TransportListenerState = .setup
     var stateUpdateHandler: (@Sendable (TransportListenerState) -> Void)?
     var newConnectionHandler: (@Sendable (any TransportConnection) -> Void)?
+    var service: NWListener.Service?
+    var serviceNameRegisteredHandler: (@Sendable (String) -> Void)?
 
     private(set) var startedQueues = [DispatchQueue]()
     private(set) var cancelCallCount = 0
@@ -228,9 +363,11 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
     private(set) var sentPayloads = [Data]()
     private(set) var receiveRequests = [ReceiveRequest]()
     private var receiveResults: [Result<Data, Error>]
+    private let endsWhenEmpty: Bool
 
-    init(receiveResults: [Result<Data, Error>]) {
+    init(receiveResults: [Result<Data, Error>], endsWhenEmpty: Bool = true) {
         self.receiveResults = receiveResults
+        self.endsWhenEmpty = endsWhenEmpty
     }
 
     func start(queue: DispatchQueue) {
@@ -255,6 +392,9 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
         receiveRequests.append(.init(minimumIncompleteLength: minimumIncompleteLength,
                                      maximumLength: maximumLength))
         guard receiveResults.isEmpty == false else {
+            if !endsWhenEmpty {
+                try await Task.sleep(for: .seconds(60))
+            }
             return TransportReceiveResult(data: Data(), contentContext: nil, isComplete: true)
         }
 

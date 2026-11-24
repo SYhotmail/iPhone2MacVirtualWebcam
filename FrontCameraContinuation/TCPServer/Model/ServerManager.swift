@@ -36,11 +36,23 @@ final class ServerManager: @unchecked Sendable {
     let lock = Mutex(())
     private let videoEffectLock = Mutex<VideoEffect?>(nil)
 
-    init(tlsConfiguration: TLSConfiguration = .default) throws {
-        let parameters = try tlsConfiguration.makeServerParameters()
+    let pairingAuthority: PairingAuthority
+    /// SHA-256 of this Mac's certificate; shared with iPhones through the pairing QR code.
+    let certificateFingerprint: Data
+    /// Bonjour name requested for this Mac; the registered one may differ after a conflict.
+    let preferredServiceName: String
+
+    init(tlsConfiguration: TLSConfiguration = .default,
+         pairingAuthority: PairingAuthority = PairingAuthority()) throws {
+        let serviceName = Host.current().localizedName ?? "Cam2Mac"
+        let identity = try MacIdentityStore.loadOrCreate(commonName: serviceName)
+        let parameters = try tlsConfiguration.makeServerParameters(identity: identity.identity)
         self.streamServer = FrameStreamServer { port in
             return try NWListener(using: parameters, on: port)
         }
+        self.pairingAuthority = pairingAuthority
+        self.certificateFingerprint = identity.fingerprint
+        self.preferredServiceName = serviceName
     }
     
     private func processSampleBuffer(_ sampleBuffer: CMSampleBuffer) -> CMSampleBuffer? {
@@ -83,6 +95,16 @@ final class ServerManager: @unchecked Sendable {
             .onMainAnyPublisher()
     }
     
+    var advertisedServiceNamePublisher: AnyPublisher<String?, Never> {
+        streamServer.state.advertisedServiceName
+            .onMainAnyPublisher()
+    }
+
+    var pairedClientsPublisher: AnyPublisher<[PairedClient], Never> {
+        pairingAuthority.clientsSubject
+            .onMainAnyPublisher()
+    }
+
     var connectedPublisher: AnyPublisher<Bool, Never> {
         streamServer.state.listenerState.combineLatest(streamServer.state.connectionState)
             .map { $0 == .ready && $1 == .ready }
@@ -138,6 +160,10 @@ final class ServerManager: @unchecked Sendable {
         await streamServer.setStreamUnavailableHandler { [weak self] in
             self?.handleStreamUnavailable()
         }
+
+        await streamServer.setHelloAuthorizer { [pairingAuthority] hello in
+            pairingAuthority.authorize(hello)
+        }
     }
     
     func start(port: UInt16 = 9999) {
@@ -151,7 +177,11 @@ final class ServerManager: @unchecked Sendable {
     
     private func startCore(port: UInt16) async {
         await sinkClient.start()
-        try? await streamServer.start(on: port)
+        do {
+            try await streamServer.start(on: port, serviceName: preferredServiceName)
+        } catch {
+            debugPrint("❌ Receiver failed to start:", error)
+        }
     }
     
     private func stopCore() async {
@@ -236,6 +266,7 @@ final class ServerManager: @unchecked Sendable {
     private func unbindStreamServerCore() async {
         await streamServer.setFrameHandler(nil)
         await streamServer.setStreamUnavailableHandler(nil)
+        await streamServer.setHelloAuthorizer(nil)
     }
     
     private func unbindCore() {

@@ -58,6 +58,9 @@ struct ConnectView: View {
             viewModel.refreshNetworkAddresses()
             viewModel.checkAutoStart()
         }
+        .sheet(item: $viewModel.pairingInvitation) { invitation in
+            PairingQRView(invitation: invitation, onCancel: viewModel.endPairing)
+        }
         .frame(minWidth: ConnectViewLayout.minimumWindowSize.width,
                minHeight: ConnectViewLayout.minimumWindowSize.height)
         .frame(maxWidth: .infinity,
@@ -483,27 +486,44 @@ struct ConnectView: View {
     private var connectionHint: some View {
         VStack(alignment: .leading, spacing: ConnectViewLayout.textStackSpacing) {
             HStack {
-                Label("Connect from iPhone", systemImage: "iphone.gen3")
+                Label("Paired iPhones", systemImage: "iphone.gen3")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(palette.primaryText)
 
                 Spacer()
 
-                Button("Copy Address") {
-                    viewModel.copyConnectionAddress()
-                }
-                .buttonStyle(.plain)
-                .font(.footnote.weight(.semibold))
-                .foregroundStyle(palette.primaryText)
+                Button("Pair iPhone…", action: viewModel.beginPairing)
+                    .buttonStyle(.plain)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(palette.primaryText)
             }
 
-            Text(viewModel.addressText)
-                .font(.system(.headline, design: .monospaced).weight(.semibold))
-                .foregroundStyle(palette.primaryText)
+            if viewModel.pairedClients.isEmpty {
+                Text("No iPhone paired yet. Tap Pair iPhone… and scan the code with the iPhone app.")
+                    .font(.footnote)
+                    .foregroundStyle(palette.secondaryText)
+            } else {
+                ForEach(viewModel.pairedClients) { client in
+                    HStack {
+                        Text(client.name)
+                            .font(.footnote.weight(.semibold))
+                            .foregroundStyle(palette.primaryText)
+                        Spacer()
+                        Button("Remove") {
+                            viewModel.removePairedClient(client)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(palette.secondaryText)
+                        .accessibilityLabel("Remove \(client.name)")
+                    }
+                }
+            }
 
-            Text("Use this LAN address in the iPhone app. If you have multiple interfaces, pick the one shared with the phone.")
+            Text("iPhones find this Mac as **\(viewModel.receiverName)** on the same Wi-Fi. Manual address: \(viewModel.addressText)")
                 .font(.footnote)
                 .foregroundStyle(palette.secondaryText)
+                .textSelection(.enabled)
 
             Text("Need a reminder? Open `Help > Quick Setup` from the menu bar.")
                 .font(.footnote.weight(.semibold))

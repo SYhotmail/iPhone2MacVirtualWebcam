@@ -169,36 +169,20 @@ The Mac app shows:
 ### On the iPhone
 
 1. Open `Cam2Camera`
-2. Look at `Cam2Camera.app` and copy the Mac LAN IP address it shows
-3. Enter that address in the `Mac Address` field
-4. Enter the port shown in the Mac app, which is `9999` by default
-5. Choose the video resolution
-6. Tap `Start Stream`
+2. First time only: click `Pair iPhone…` in `Cam2Camera.app`, tap `Pair with Mac` in the iPhone app, scan the QR code, and confirm
+3. Choose the video resolution
+4. Tap `Start Stream`
 
 The iPhone app includes a local preview so you can frame the shot before or during streaming.
 
-## Mac LAN IP Reminder
+## Pairing and Discovery
 
-The `Mac Address` field in the iPhone UI expects the Mac's IP address on your local network, for example:
+You don't type an IP address. The Mac advertises itself over Bonjour (`_cam2mac._udp`) on the local network, and the paired iPhone finds it by name. The Mac's IP can change freely.
 
-```text
-192.168.1.10
-```
-
-It does **not** mean the hardware MAC address.
-
-In the current flow, `Cam2Camera.app` detects and displays the Mac LAN IP for you. You usually do not need to look it up manually.
-
-If you ever need to verify it yourself, you can still find it here:
-
-- `System Settings` -> `Wi-Fi` -> connected network -> inspect the IP address
-- Terminal:
-
-```bash
-ipconfig getifaddr en0
-```
-
-If your Mac is using a different interface, `en0` may be something else. The important part is to use the LAN address that your iPhone can reach on the same Wi‑Fi network.
+- Pairing is done once per iPhone. The QR code holds the Mac's certificate fingerprint and a one-time token that expires after 5 minutes. You can also scan it with the system Camera app, which opens Cam2Mac through the `cam2mac://` link.
+- The iPhone and Mac must be on the same Wi-Fi network. Wi-Fi Aware isn't used because macOS doesn't support it.
+- Paired iPhones are listed in the Mac app, where you can remove them. A removed iPhone is refused until it pairs again.
+- If Bonjour is blocked on your network, open `Manual Address` in the iPhone app and enter the Mac's LAN IP (shown in the Mac app). Pairing is still required.
 
 ## Default Port
 
@@ -215,25 +199,19 @@ The Mac app listens on that port by default, and the iPhone UI also defaults to 
 The stream transport is configured as:
 
 - `QUIC` using `Network.framework`
-- certificate-based TLS
-- a bundled server certificate presented by the Mac app
-- client-side certificate pinning in the iPhone app
+- certificate-based TLS with a per-Mac self-signed P-256 identity, created on first launch and kept in the Mac's Keychain
+- client-side pinning of that certificate's SHA-256 fingerprint, learned from the pairing QR code
 - a private ALPN: `camera-lan-stream`
-
-The iPhone and Mac must use compatible bundled TLS resources and transport settings. In practice that means:
-
-- the same bundled server certificate and PKCS#12 identity from the `Transport` package
-- the same QUIC ALPN
-- the same framing protocol on top of the transport
+- a `PairingHello` handshake as the first packet; the Mac accepts frames only from paired iPhones
 
 The current defaults live in:
 
 - `FrontCameraContinuation/Shared/TLSConfiguration.swift`
 - `Transport/Sources/Transport/TransportTLSParameters.swift`
-- `Transport/Sources/Transport/Resources/cam2mac-local-server.cer`
-- `Transport/Sources/Transport/Resources/cam2mac-local-server.p12`
+- `Transport/Sources/Transport/Pairing.swift`
+- `FrontCameraContinuation/TCPServer/Model/MacIdentityStore.swift` and `PairingAuthority.swift`
 
-If you change Transport TLS resources or Transport networking code, rebuild both the iPhone app and the Mac app so they embed the same package resources.
+If you change Transport networking code, rebuild both the iPhone app and the Mac app.
 
 ## Using the Virtual Camera in Zoom
 

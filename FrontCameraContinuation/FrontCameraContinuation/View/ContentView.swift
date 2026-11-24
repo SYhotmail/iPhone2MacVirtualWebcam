@@ -1,10 +1,12 @@
 import SwiftUI
+import Transport
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @Bindable var viewModel: ContentViewModel
     @FocusState private var focusedField: Field?
+    @State private var isConfirmingUnpair = false
     @Namespace private var namespace
     let previewId = "preview"
     
@@ -40,6 +42,29 @@ struct ContentView: View {
         }
         .animation(viewModel.previewAnimation,
                    value: viewModel.isPreviewVisible)
+        .fullScreenCover(isPresented: $viewModel.isScanningPairingCode,
+                         onDismiss: viewModel.pairingScannerDidDismiss) {
+            PairingScannerView(
+                onFound: viewModel.handleScannedInvitation,
+                onCancel: { viewModel.isScanningPairingCode = false }
+            )
+        }
+        .alert(
+            "Pair with \(viewModel.invitationToConfirm?.serviceName ?? "Mac")?",
+            isPresented: Binding(
+                get: { viewModel.invitationToConfirm != nil },
+                set: { if !$0 { viewModel.invitationToConfirm = nil } }
+            ),
+            presenting: viewModel.invitationToConfirm
+        ) { invitation in
+            Button("Pair") {
+                viewModel.confirmPairing(invitation)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: { _ in
+            Text("This iPhone will send its camera feed to this Mac. Only pair with a Mac you own.")
+        }
+        .onOpenURL(perform: viewModel.handlePairingURL)
         .fullScreenCover(isPresented: $viewModel.showFullScreenPreview,
                          onDismiss:
             viewModel.handleFullScreenPreviewDismiss,
@@ -252,30 +277,37 @@ struct ContentView: View {
 
     private var controlsSection: some View {
         VStack(spacing: 16) {
-            VStack(spacing: 14) {
-                settingField(
-                    title: "Mac Address",
-                    systemImage: "desktopcomputer",
-                    prompt: "192.168.1.10",
-                    text: $viewModel.host
-                )
-                .focused($focusedField, equals: .host)
-                .textContentType(.URL)
-                .keyboardType(.numbersAndPunctuation)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .submitLabel(.next)
+            pairedMacRow
 
-                settingField(
-                    title: "Port",
-                    systemImage: "network",
-                    prompt: "9999",
-                    text: $viewModel.port
-                )
-                .focused($focusedField, equals: .port)
-                .keyboardType(.numberPad)
-                .submitLabel(.done)
+            DisclosureGroup("Manual Address") {
+                VStack(spacing: 14) {
+                    settingField(
+                        title: "Mac Address (optional)",
+                        systemImage: "desktopcomputer",
+                        prompt: "Found automatically",
+                        text: $viewModel.manualHost
+                    )
+                    .focused($focusedField, equals: .host)
+                    .textContentType(.URL)
+                    .keyboardType(.numbersAndPunctuation)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .submitLabel(.next)
+
+                    settingField(
+                        title: "Port",
+                        systemImage: "network",
+                        prompt: "9999",
+                        text: $viewModel.port
+                    )
+                    .focused($focusedField, equals: .port)
+                    .keyboardType(.numberPad)
+                    .submitLabel(.done)
+                }
+                .padding(.top, 10)
             }
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(secondaryTextColor)
 
             Button(action: toggleStreaming) {
                 HStack(spacing: 10) {
@@ -312,6 +344,61 @@ struct ContentView: View {
         .overlay {
             RoundedRectangle(cornerRadius: 28, style: .continuous)
                 .stroke(cardBorderColor, lineWidth: 1)
+        }
+    }
+
+    private var pairedMacRow: some View {
+        HStack(spacing: 12) {
+            Image(systemName: viewModel.pairedMac == nil ? "link.badge.plus" : "desktopcomputer")
+                .font(.headline)
+                .foregroundStyle(primaryTextColor)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(viewModel.pairedMac?.serviceName ?? "No Mac paired")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(primaryTextColor)
+                Text(viewModel.pairedMac == nil ? "Scan the code from the Mac app" : "Found automatically on your Wi-Fi")
+                    .font(.caption)
+                    .foregroundStyle(secondaryTextColor)
+            }
+
+            Spacer()
+
+            if let pairedMac = viewModel.pairedMac {
+                // Plain buttons instead of a Menu: the Menu froze the UI on device.
+                Button {
+                    viewModel.beginPairingScan()
+                } label: {
+                    Image(systemName: "qrcode.viewfinder")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Pair with Another Mac")
+
+                Button(role: .destructive) {
+                    isConfirmingUnpair = true
+                } label: {
+                    Image(systemName: "xmark.circle")
+                        .font(.title3)
+                        .frame(width: 44, height: 44)
+                }
+                .accessibilityLabel("Unpair")
+                .confirmationDialog(
+                    "Unpair from \(pairedMac.serviceName)?",
+                    isPresented: $isConfirmingUnpair,
+                    titleVisibility: .visible
+                ) {
+                    Button("Unpair", role: .destructive, action: viewModel.unpair)
+                } message: {
+                    Text("You'll need to scan a new code from the Mac app to stream again.")
+                }
+            } else {
+                Button("Pair") {
+                    viewModel.beginPairingScan()
+                }
+                .font(.subheadline.weight(.semibold))
+            }
         }
     }
 
@@ -407,7 +494,7 @@ struct ContentView: View {
             return Color.orange
         case .streaming:
             return Color.green
-        case .attentionNeeded:
+        case .attentionNeeded, .pairingNeeded:
             return Color.red
         }
     }
@@ -422,7 +509,7 @@ struct ContentView: View {
             return Color.orange.opacity(0.85)
         case .streaming:
             return Color.red
-        case .attentionNeeded:
+        case .attentionNeeded, .pairingNeeded:
             return Color.red.opacity(0.82)
         }
     }

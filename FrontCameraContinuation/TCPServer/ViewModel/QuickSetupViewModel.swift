@@ -78,8 +78,8 @@ final class QuickSetupViewModel {
             detail: "Launch the listener on your Mac before you start streaming from the iPhone."
         ),
         Step(
-            title: "Connect from iPhone",
-            detail: "Enter the Mac IP address and port shown in the receiver window, then tap Start Stream on the phone."
+            title: "Pair your iPhone",
+            detail: "Click Pair iPhone… in the receiver window and scan the code with the iPhone app (once per iPhone). Then tap Start Stream on the phone."
         ),
         Step(
             title: "Pick the virtual camera in apps",

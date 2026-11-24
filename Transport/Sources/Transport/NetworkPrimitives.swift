@@ -7,7 +7,7 @@ public enum TransportNetworkProtocol: Sendable {
               direction: NWProtocolQUIC.Options.Direction = .bidirectional)
     
     public static var commonQUIC: Self {
-        .quic(alpn: ["camera-lan-stream"], direction: .unidirectional)
+        .quic(alpn: ["camera-lan-stream"], direction: .bidirectional)
     }
 }
 
@@ -139,6 +139,10 @@ protocol TransportListener: AnyObject, Sendable {
     var state: TransportListenerState { get }
     var stateUpdateHandler: (@Sendable (TransportListenerState) -> Void)? { get set }
     var newConnectionHandler: (@Sendable (any TransportConnection) -> Void)? { get set }
+    /// Bonjour service to advertise; must be set before `start`.
+    var service: NWListener.Service? { get set }
+    /// Called with the service name actually registered (Bonjour may rename on conflicts).
+    var serviceNameRegisteredHandler: (@Sendable (String) -> Void)? { get set }
 
     func start(queue: DispatchQueue)
     func cancel()
@@ -185,6 +189,22 @@ final class NWListenerAdapter: TransportListener {
         set {
             listener.newConnectionHandler = { connection in
                 newValue?(NWConnectionAdapter(connection: connection))
+            }
+        }
+    }
+
+    var service: NWListener.Service? {
+        get { listener.service }
+        set { listener.service = newValue }
+    }
+
+    var serviceNameRegisteredHandler: (@Sendable (String) -> Void)? {
+        didSet {
+            let handler = serviceNameRegisteredHandler
+            listener.serviceRegistrationUpdateHandler = { change in
+                if case let .add(.service(name, _, _, _)) = change {
+                    handler?(name)
+                }
             }
         }
     }

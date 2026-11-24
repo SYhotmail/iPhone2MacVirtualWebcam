@@ -1,7 +1,6 @@
 import AppIntents
 import Foundation
 import Observation
-import Transport
 
 
 @Observable
@@ -47,14 +46,14 @@ final class StreamingLaunchCoordinator {
 
 struct StartStreamingAppIntent: AppIntent {
     static let title: LocalizedStringResource = "Start Streaming on Cam2Mac"
-    static let description = IntentDescription("Opens Cam2Mac on iPhone and starts sending the saved camera feed to your Mac receiver.")
+    static let description = IntentDescription("Opens Cam2Mac on iPhone and starts sending the camera feed to your paired Mac.")
     static let openAppWhenRun = true
     
     @MainActor
     var coordinator: StreamingLaunchCoordinator { .shared }
     
     func perform() async throws -> some IntentResult {
-        guard StreamingDestinationConfiguration() != nil else {
+        guard PairedMacStore.load() != nil else {
             return .result()
         }
 
@@ -91,31 +90,5 @@ struct Cam2MacAppShortcuts: AppShortcutsProvider {
             shortTitle: "Start Streaming",
             systemImageName: "dot.radiowaves.left.and.right"
         )
-    }
-}
-
-nonisolated
-private struct StreamingDestinationConfiguration: Sendable {
-    let host: String
-    let port: UInt16
-    
-    init?(defaults: UserDefaults = .standard) {
-        let tuple = ContentViewModel.hostPortTuple(defaults: defaults)
-        
-        let host = tuple.host
-        let port = UInt16(tuple.port)
-        
-        guard let port else {
-            return nil
-        }
-        
-        let isValid = !host.isEmpty && FrameStreamClient.accepts(port: port)
-        
-        guard isValid else {
-            return nil
-        }
-        
-        self.host = host
-        self.port = port
     }
 }

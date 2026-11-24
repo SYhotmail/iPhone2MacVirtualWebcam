@@ -37,17 +37,13 @@ Shared TLS setup lives in:
 - `FrontCameraContinuation/Shared/TLSConfiguration.swift`
 - `Transport/Sources/Transport/TransportTLSParameters.swift`
 
-Bundled certificate assets live in:
+Identity and pairing:
 
-- `Transport/Sources/Transport/Resources/cam2mac-local-server.cer`
-- `Transport/Sources/Transport/Resources/cam2mac-local-server.p12`
-
-Important:
-
-- The client uses certificate pinning against the bundled server certificate.
-- The server presents the bundled PKCS#12 identity.
-- Rebuild both iPhone and Mac apps after changing Transport resources or TLS code, because each app embeds its own package resources.
-- The Mac LAN IP is expected to change, so avoid IP-specific certificate assumptions.
+- Each Mac creates its own P-256 key and self-signed certificate (`SelfSignedCertificate` in Transport, stored by `TCPServer/Model/MacIdentityStore.swift` in the Keychain). There are no bundled certificates.
+- The iPhone pins the Mac certificate's SHA-256 fingerprint, learned from the pairing QR code (`PairingInvitation`, `cam2mac://pair?...`).
+- The first packet on every connection is a JSON `PairingHello` (`pair` with a one-time token, or `hello` with the registered secret). The server replies with a `PairingReply` on the same bidirectional QUIC stream and accepts frames only after `ok`. `TCPServer/Model/PairingAuthority.swift` decides.
+- The Mac advertises Bonjour `_cam2mac._udp`. The iPhone connects to the service name, so Mac IP changes don't matter.
+- Rebuild both iPhone and Mac apps after changing Transport or TLS code.
 
 ## Networking Behavior
 
@@ -68,6 +64,7 @@ Behavior:
 
 - If an existing connection has already started streaming frames, a second client is rejected.
 - If an existing connection is stale and never reached real streaming, a new connection may replace it.
+- A connection only counts as streaming after it authenticated and sent a frame.
 
 This logic lives in:
 

@@ -10,7 +10,6 @@
 import UIKit
 import Combine
 import H264
-import Network
 import Transport
 
 nonisolated
@@ -40,10 +39,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     }
 
     init(tlsConfiguration: TLSConfiguration = .default) throws {
-        let parameters = try tlsConfiguration.makeClientParameters()
-        self.streamClient = FrameStreamClient { host, port in
-            return NWConnection(host: host, port: port, using: parameters)
-        }
+        self.streamClient = FrameStreamClient(transport: tlsConfiguration.transport)
         super.init()
         
         encoder = .init(
@@ -103,20 +99,22 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         }
     }
 
-    func startStreaming(host: String, port: UInt16, position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) -> Bool {
+    func startStreaming(to destination: FrameStreamClient.Destination, position: AVCaptureDevice.Position, preset: AVCaptureSession.Preset) -> Bool {
         shouldAutoResume = true
         isStreamingRequestedPublisher.value = true
         cancelPendingReconnect()
 
-        let canConnect = FrameStreamClient.accepts(port: port)
-        if canConnect {
-            Task {
-                _ = await streamClient.connect(toHost: host, port: port)
-            }
+        Task {
+            await streamClient.connect(to: destination)
         }
-        return preparePreview(position: position, preset: preset) && canConnect
+        return preparePreview(position: position, preset: preset)
     }
     
+    /// Releases the camera so another capture client (the pairing scanner) can use it.
+    func stopCapture() {
+        captureSessionManager.stopRunning()
+    }
+
     private func encoderInvalidate() {
         encoder.scheduleToInvalidate()
     }

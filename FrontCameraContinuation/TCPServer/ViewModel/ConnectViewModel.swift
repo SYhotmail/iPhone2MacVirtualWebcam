@@ -2,6 +2,7 @@ import AppKit
 import Combine
 import Foundation
 import Observation
+import Transport
 import UniformTypeIdentifiers
 
 @MainActor
@@ -25,6 +26,17 @@ final class ConnectViewModel {
     private(set) var connectionStatus = "Waiting for Listener"
     private(set) var networkAddresses = [String]()
     private(set) var backgroundImage: NSImage?
+    private(set) var advertisedServiceName: String?
+    private(set) var pairedClients = [PairedClient]()
+    /// Non-nil while the pairing QR sheet is shown.
+    var pairingInvitation: PairingInvitation?
+
+    @ObservationIgnored
+    private var pairingExpiryTask: Task<Void, Never>? {
+        didSet {
+            oldValue?.cancel()
+        }
+    }
     
     @ObservationIgnored
     private(set) var scheduleTask: Task<Void, Never>? {
@@ -437,6 +449,37 @@ final class ConnectViewModel {
         "\(primaryAddressForConnection):\(listenTextPort)"
     }
 
+    /// Bonjour name iPhones connect to.
+    var receiverName: String {
+        advertisedServiceName ?? manager.preferredServiceName
+    }
+
+    /// Shows a single-use QR code that lets one iPhone pair within `PairingAuthority.pairingWindow`.
+    func beginPairing() {
+        startServer()
+        let token = manager.pairingAuthority.beginPairing()
+        pairingInvitation = PairingInvitation(
+            fingerprint: manager.certificateFingerprint,
+            token: token,
+            serviceName: receiverName
+        )
+        pairingExpiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(PairingAuthority.pairingWindow))
+            guard !Task.isCancelled else { return }
+            self?.endPairing()
+        }
+    }
+
+    func endPairing() {
+        pairingExpiryTask = nil
+        manager.pairingAuthority.cancelPairing()
+        pairingInvitation = nil
+    }
+
+    func removePairedClient(_ client: PairedClient) {
+        manager.pairingAuthority.remove(clientID: client.id)
+    }
+
     func copyConnectionAddress() {
         pasteboard.clearContents()
         pasteboard.setString(addressText, forType: .string)
@@ -455,6 +498,24 @@ final class ConnectViewModel {
             }
             .store(in: &cancellables)
         
+        manager.advertisedServiceNamePublisher
+            .sink { [unowned self] name in
+                self.advertisedServiceName = name
+            }
+            .store(in: &cancellables)
+
+        manager.pairedClientsPublisher
+            .sink { [unowned self] clients in
+                let didPairNewClient = clients.contains { client in
+                    !self.pairedClients.contains { $0.id == client.id && $0.pairedAt == client.pairedAt }
+                }
+                self.pairedClients = clients
+                if didPairNewClient, self.pairingInvitation != nil {
+                    self.endPairing()
+                }
+            }
+            .store(in: &cancellables)
+
         installer.detectedPropertiesSubject.sink { [unowned self] detectedProperties in
             self.detectedProperties = detectedProperties
             self.scheduleTask = nil
@@ -479,6 +540,7 @@ final class ConnectViewModel {
     isolated
     deinit {
         networkAddressTask = nil
+        pairingExpiryTask = nil
         unbind()
     }
 }

@@ -6,13 +6,21 @@ import Network
 public final class FrameStreamServerState: @unchecked Sendable {
     public let connectionState = CurrentValueSubject<TransportConnectionState, Never>(.setup)
     public let listenerState = CurrentValueSubject<TransportListenerState, Never>(.setup)
+    /// Bonjour name the listener is currently registered under, if advertising.
+    public let advertisedServiceName = CurrentValueSubject<String?, Never>(nil)
 
     public init() {}
 }
 
 /// Receives packetized frame data from a single client over the configured network transport.
+///
+/// Every connection must first send a `PairingHello`; frames are only accepted after the
+/// injected authorizer approves it.
 public actor FrameStreamServer {
+    public typealias HelloAuthorizer = @Sendable (PairingHello) async -> PairingReply
+
     public nonisolated let state: FrameStreamServerState
+    private var helloAuthorizer: HelloAuthorizer?
 
     private var onFrame: (@Sendable (Data) -> Void)?
     private var onStreamUnavailable: (@Sendable () -> Void)?
@@ -58,11 +66,16 @@ public actor FrameStreamServer {
         onFrame = handler
     }
 
+    public func setHelloAuthorizer(_ authorizer: HelloAuthorizer?) {
+        helloAuthorizer = authorizer
+    }
+
     public func setStreamUnavailableHandler(_ handler: (@Sendable () -> Void)?) {
         onStreamUnavailable = handler
     }
 
-    public func start(on port: UInt16) throws {
+    /// Starts listening on `port`, advertising `serviceName` over Bonjour when given.
+    public func start(on port: UInt16, serviceName: String? = nil) throws {
         guard let portValue = NWEndpoint.Port(rawValue: port) else {
             throw NSError(domain: "frame-stream-server", code: .min, userInfo: [NSLocalizedFailureErrorKey: "Invalid port \(port)"])
         }
@@ -77,6 +90,13 @@ public actor FrameStreamServer {
 
         listener.stateUpdateHandler = { [state] listenerState in
             state.listenerState.value = listenerState
+        }
+
+        if let serviceName {
+            listener.service = NWListener.Service(name: serviceName, type: FrameStreamService.type)
+            listener.serviceNameRegisteredHandler = { [state] name in
+                state.advertisedServiceName.value = name
+            }
         }
 
         self.listener = listener
@@ -106,6 +126,7 @@ public actor FrameStreamServer {
         disconnectClients()
         listener.stateUpdateHandler = nil
         self.listener = nil
+        state.advertisedServiceName.value = nil
     }
 
     private func handleConnectionStateUpdate(_ connectionState: TransportConnectionState, for connection: any TransportConnection) {
@@ -114,7 +135,9 @@ public actor FrameStreamServer {
         switch connectionState {
         case .ready:
             scheduleInactivityTimeout(for: connection)
-            receive(from: connection)
+            Task {
+                await authenticate(connection)
+            }
         case .waiting(let error):
             debugPrint("⏳ Connection waiting:", error)
             close(connection, cancel: true)
@@ -163,9 +186,49 @@ public actor FrameStreamServer {
         connections.removeAll { ObjectIdentifier($0) == connectionID }
     }
 
+    private func authenticate(_ connection: any TransportConnection) async {
+        let reply: PairingReply
+        do {
+            let payload = try await FramePacket.read(from: connection, maximumPayloadSize: PairingHello.maximumEncodedSize)
+            let hello = try JSONDecoder().decode(PairingHello.self, from: payload)
+            if hello.version != PairingHello.currentVersion {
+                reply = .rejected("Unsupported protocol version \(hello.version)")
+            } else if let helloAuthorizer {
+                reply = await helloAuthorizer(hello)
+            } else {
+                reply = .rejected("Receiver is not accepting connections")
+            }
+        } catch {
+            debugPrint("❌ Failed to read hello:", error)
+            cancelAndClose(connection)
+            return
+        }
+
+        guard self.connection(matching: ObjectIdentifier(connection)) != nil else {
+            return
+        }
+
+        do {
+            try await connection.send(content: FramePacket.packetized(JSONEncoder().encode(reply)))
+        } catch {
+            debugPrint("❌ Failed to send hello reply:", error)
+            cancelAndClose(connection)
+            return
+        }
+
+        guard reply.ok else {
+            debugPrint("🚫 Rejected client:", reply.reason ?? "")
+            cancelAndClose(connection)
+            return
+        }
+
+        scheduleInactivityTimeout(for: connection)
+        receive(from: connection)
+    }
+
     private func receive(from connection: any TransportConnection) {
         Task {
-            await readSize(from: connection)
+            await readFrame(from: connection)
         }
     }
 
@@ -173,39 +236,12 @@ public actor FrameStreamServer {
         close(connection, cancel: true)
     }
 
-    private func readSize(from connection: any TransportConnection) async {
-        let headerByteCount = FramePacket.headerByteCount
-        let header: Data
-        do {
-            header = try await readExactByteCount(headerByteCount, from: connection)
-        } catch {
-            debugPrint("❌ Failed to read size:", error)
-            cancelAndClose(connection)
-            return
-        }
-
-        guard header.count == headerByteCount else {
-            debugPrint("❌ Failed to read size: invalid header length \(header.count)")
-            cancelAndClose(connection)
-            return
-        }
-
-        let expectedSize = FramePacket.payloadSize(for: header)
-        await readFrame(from: connection, expectedSize: expectedSize)
-    }
-
-    private func readFrame(from connection: any TransportConnection, expectedSize: Int) async {
+    private func readFrame(from connection: any TransportConnection) async {
         let frame: Data
         do {
-            frame = try await readExactByteCount(expectedSize, from: connection)
+            frame = try await FramePacket.read(from: connection)
         } catch {
             debugPrint("❌ Failed to read frame:", error)
-            cancelAndClose(connection)
-            return
-        }
-
-        guard frame.count == expectedSize else {
-            debugPrint("❌ Failed to read frame: expected \(expectedSize) bytes, got \(frame.count)")
             cancelAndClose(connection)
             return
         }
@@ -250,33 +286,6 @@ public actor FrameStreamServer {
 
     private func connection(matching identifier: ObjectIdentifier) -> (any TransportConnection)? {
         connections.first { ObjectIdentifier($0) == identifier }
-    }
-
-    private func readExactByteCount(_ expectedSize: Int, from connection: any TransportConnection) async throws -> Data {
-        var accumulated = Data()
-        accumulated.reserveCapacity(expectedSize)
-
-        while accumulated.count < expectedSize {
-            let remaining = expectedSize - accumulated.count
-            let result = try await connection.receive(
-                minimumIncompleteLength: 1,
-                maximumLength: remaining
-            )
-
-            if !result.data.isEmpty {
-                accumulated.append(result.data)
-            }
-
-            if result.isComplete && accumulated.count < expectedSize {
-                throw NSError(
-                    domain: "frame-stream-server",
-                    code: Int(POSIXErrorCode.ENOTCONN.rawValue),
-                    userInfo: [NSLocalizedDescriptionKey: "Stream ended before \(expectedSize) bytes were received"]
-                )
-            }
-        }
-
-        return accumulated
     }
 
     private func close(_ connection: any TransportConnection, cancel: Bool) {

@@ -16,11 +16,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "Transport",
-            resources: [
-                .copy("Resources/cam2mac-local-server.cer"),
-                .copy("Resources/cam2mac-local-server.p12"),
-            ]
+            name: "Transport"
         ),
         .testTarget(
             name: "TransportTests",

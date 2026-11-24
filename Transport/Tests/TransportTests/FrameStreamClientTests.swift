@@ -5,70 +5,119 @@ import Testing
 
 @Suite("FrameStreamClient Tests")
 struct FrameStreamClientTests {
+    private static let pairHello = PairingHello.pair(
+        token: Data(repeating: 9, count: 16),
+        clientID: UUID(),
+        secret: Data(repeating: 3, count: 32),
+        deviceName: "Test iPhone"
+    )
+    private static let destination = FrameStreamClient.Destination.host(
+        "192.168.1.10", port: 9999,
+        pinnedFingerprint: Data(repeating: 0xAB, count: 32),
+        hello: pairHello
+    )!
+
     @Test
     func connectTransitionsToFailedWhenConnectionWaits() async {
         let mockConnection = MockTransportConnection()
-        let manager = FrameStreamClient(connectionFactory: .init { _, _ in
-            mockConnection
-        })
-
+        let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
         let recorder = StatusRecorder()
         await manager.setStatusChangedHandler { status in
-            Task {
-                await recorder.append(status)
-            }
+            Task { await recorder.append(status) }
         }
 
-        let didConnect = await manager.connect(toHost: "127.0.0.1", port: 8080)
-        #expect(didConnect)
-
+        await manager.connect(to: Self.destination)
         mockConnection.simulateState(.waiting(.posix(.ECONNREFUSED)))
-        let statuses = await recorder.waitForCount(2)
-        #expect(statuses == [.connecting, .failed])
+
+        #expect(await recorder.waitForCount(2) == [.connecting, .failed])
     }
 
     @Test
-    func connectAndSendPacketsDataThroughInjectedConnection() async {
-        let mockConnection = MockTransportConnection()
-        let manager = FrameStreamClient(connectionFactory: .init { _, _ in
-            mockConnection
-        })
-
+    func sendsHelloFirstAndConnectsAfterAcceptedReply() async throws {
+        let mockConnection = MockTransportConnection(replies: [.accepted])
+        let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
         let recorder = StatusRecorder()
         await manager.setStatusChangedHandler { status in
-            Task {
-                await recorder.append(status)
-            }
+            Task { await recorder.append(status) }
         }
 
-        let didConnect = await manager.connect(toHost: "192.168.1.10", port: 9999)
-        #expect(didConnect)
-
+        await manager.connect(to: Self.destination)
         mockConnection.simulateState(.ready)
-        let statuses = await recorder.waitForCount(2)
+        #expect(await recorder.waitForCount(2) == [.connecting, .connected])
 
         await manager.send(Data([0x01, 0x02, 0x03]))
 
-        #expect(statuses == [.connecting, .connected])
-        #expect(mockConnection.startedQueues.count == 1)
-        #expect(mockConnection.sentPayloads == [FramePacket.packetized(Data([0x01, 0x02, 0x03]))])
+        let sent = mockConnection.sentPayloads
+        #expect(sent.count == 2)
+        #expect(try JSONDecoder().decode(PairingHello.self, from: sent[0].dropFirst(4)) == Self.pairHello)
+        #expect(sent[1] == FramePacket.packetized(Data([0x01, 0x02, 0x03])))
     }
 
     @Test
-    func reconnectCurrentReusesLastEndpoint() async {
+    func dropsFramesBeforeHandshakeCompletes() async {
+        let mockConnection = MockTransportConnection()
+        let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
+
+        await manager.connect(to: Self.destination)
+        await manager.send(Data([0x01]))
+
+        #expect(mockConnection.sentPayloads.isEmpty)
+    }
+
+    @Test
+    func rejectedReplyIsStickyAndCancelsConnection() async {
+        let mockConnection = MockTransportConnection(replies: [.rejected("unknown client")])
+        let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
+        let recorder = StatusRecorder()
+        await manager.setStatusChangedHandler { status in
+            Task { await recorder.append(status) }
+        }
+
+        await manager.connect(to: Self.destination)
+        mockConnection.simulateState(.ready)
+        #expect(await recorder.waitForCount(2) == [.connecting, .rejected(reason: "unknown client")])
+
+        mockConnection.simulateState(.failed(.posix(.ECONNRESET)))
+        try? await Task.sleep(for: .milliseconds(20))
+
+        #expect(await recorder.values() == [.connecting, .rejected(reason: "unknown client")])
+        #expect(mockConnection.cancelCallCount == 1)
+    }
+
+    @Test
+    func reconnectAfterPairingUsesHelloInsteadOfSpentToken() async {
         let factoryRecorder = ConnectionFactoryRecorder()
-        let manager = FrameStreamClient(connectionFactory: .init { _, _ in
-            let connection = MockTransportConnection()
-            factoryRecorder.append(connection)
+        let manager = FrameStreamClient(connectionFactory: { destination in
+            let connection = MockTransportConnection(replies: [.accepted])
+            factoryRecorder.append(connection, destination: destination)
             return connection
         })
+        let recorder = StatusRecorder()
+        await manager.setStatusChangedHandler { status in
+            Task { await recorder.append(status) }
+        }
 
-        #expect(await manager.connect(toHost: "10.0.0.2", port: 7777))
+        await manager.connect(to: Self.destination)
+        factoryRecorder.snapshot()[0].connection.simulateState(.ready)
+        _ = await recorder.waitForCount(2)
         #expect(await manager.reconnect())
 
-        let createdConnections = factoryRecorder.snapshot()
-        #expect(createdConnections.count == 2)
-        #expect(createdConnections[0].cancelCallCount == 1)
+        let created = factoryRecorder.snapshot()
+        #expect(created.count == 2)
+        #expect(created[0].connection.cancelCallCount == 1)
+        #expect(created[0].destination.hello.kind == .pair)
+        #expect(created[1].destination.hello == .hello(clientID: Self.pairHello.clientID, secret: Self.pairHello.secret))
+        #expect(created[1].destination.endpoint == Self.destination.endpoint)
+    }
+
+    @Test
+    func serviceDestinationTargetsBonjourType() {
+        let destination = FrameStreamClient.Destination.service(
+            named: "Studio Mac",
+            pinnedFingerprint: Data(),
+            hello: Self.pairHello
+        )
+        #expect(destination.endpoint == .service(name: "Studio Mac", type: "_cam2mac._udp", domain: "local.", interface: nil))
     }
 }
 
@@ -93,20 +142,20 @@ private actor StatusRecorder {
 }
 
 private final class ConnectionFactoryRecorder: @unchecked Sendable {
-    private let lock = NSLock()
-    private var connections = [MockTransportConnection]()
-
-    func append(_ connection: MockTransportConnection) {
-        lock.lock()
-        connections.append(connection)
-        lock.unlock()
+    struct Entry {
+        let connection: MockTransportConnection
+        let destination: FrameStreamClient.Destination
     }
 
-    func snapshot() -> [MockTransportConnection] {
-        lock.lock()
-        let snapshot = connections
-        lock.unlock()
-        return snapshot
+    private let lock = NSLock()
+    private var entries = [Entry]()
+
+    func append(_ connection: MockTransportConnection, destination: FrameStreamClient.Destination) {
+        lock.withLock { entries.append(.init(connection: connection, destination: destination)) }
+    }
+
+    func snapshot() -> [Entry] {
+        lock.withLock { entries }
     }
 }
 
@@ -117,32 +166,45 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
     var viabilityUpdateHandler: (@Sendable (Bool) -> Void)?
     var betterPathUpdateHandler: (@Sendable (Bool) -> Void)?
 
-    private(set) var startedQueues = [DispatchQueue]()
-    private(set) var cancelCallCount = 0
-    private(set) var forceCancelCallCount = 0
-    private(set) var sentPayloads = [Data]()
+    private let lock = NSLock()
+    private var _startedQueues = [DispatchQueue]()
+    private var _cancelCallCount = 0
+    private var _sentPayloads = [Data]()
+    private var pendingReceive: Data
+
+    var startedQueues: [DispatchQueue] { lock.withLock { _startedQueues } }
+    var cancelCallCount: Int { lock.withLock { _cancelCallCount } }
+    var sentPayloads: [Data] { lock.withLock { _sentPayloads } }
+
+    init(replies: [PairingReply] = []) {
+        pendingReceive = replies.reduce(into: Data()) { buffer, reply in
+            buffer.append(FramePacket.packetized(try! JSONEncoder().encode(reply)))
+        }
+    }
 
     func start(queue: DispatchQueue) {
-        startedQueues.append(queue)
+        lock.withLock { _startedQueues.append(queue) }
     }
 
     func cancel() {
-        cancelCallCount += 1
+        lock.withLock { _cancelCallCount += 1 }
     }
 
-    func forceCancel() {
-        forceCancelCallCount += 1
-    }
+    func forceCancel() {}
 
     func send(content: Data?) async throws {
         if let content {
-            sentPayloads.append(content)
+            lock.withLock { _sentPayloads.append(content) }
         }
     }
 
     func receive(minimumIncompleteLength: Int, maximumLength: Int) async throws -> TransportReceiveResult {
-        Issue.record("FrameStreamClient tests should not receive data.")
-        return TransportReceiveResult(data: Data(), contentContext: nil, isComplete: true)
+        let chunk: Data = lock.withLock {
+            let chunk = pendingReceive.prefix(maximumLength)
+            pendingReceive = pendingReceive.dropFirst(chunk.count)
+            return Data(chunk)
+        }
+        return TransportReceiveResult(data: chunk, contentContext: nil, isComplete: chunk.isEmpty)
     }
 
     func simulateState(_ newState: TransportConnectionState) {
