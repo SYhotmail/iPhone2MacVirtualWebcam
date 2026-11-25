@@ -35,6 +35,7 @@ Important implications:
 - A datagram flow must be extracted with the group's own QUIC options plus `isDatagram = true` (`NWConnectionGroup.extractDatagramFlow()`); fresh options fail.
 - The client's multiplex group opens an implicit stream that never carries data, so the Mac takes the first stream that becomes ready as the control stream (`QUICTunnelAcceptor`).
 - A client multiplex group briefly reports `waiting` before `ready`; `QUICClientConnection` only reports waits longer than 2 s.
+- On iOS 18, `NWConnectionGroup(with: NWMultiplexGroup(to: .service(...)))` traps (EXC_BREAKPOINT). `QUICClientConnection` resolves the Bonjour name with a UDP `NWConnection` first and opens the group to the resolved address. Check transport changes on an iOS 18 simulator, not only macOS 26.
 - The TCP transport (tests, fallback) still sends frames length-prefixed on the stream.
 - `PairingHello.currentVersion` is 2 since frames moved to datagrams; mismatched apps are rejected with a version error.
 

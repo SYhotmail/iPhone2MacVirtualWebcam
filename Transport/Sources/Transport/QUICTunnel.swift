@@ -130,13 +130,20 @@ final class QUICTunnelAcceptor: @unchecked Sendable {
 }
 
 /// Client side: a QUIC tunnel to the receiver, exposing its control stream as a `TransportConnection`.
+///
+/// A Bonjour service endpoint is resolved to an address first: on iOS 18, creating a multiplex
+/// group for a `.service` endpoint traps inside Network.framework.
 final class QUICClientConnection: TransportConnection, @unchecked Sendable {
     /// A multiplex group reports `waiting` for a moment before `ready` even on a healthy path;
     /// only a wait longer than this is reported.
     static let waitingGracePeriod: TimeInterval = 2
 
-    private let group: NWConnectionGroup
+    private let endpoint: NWEndpoint
+    private let parameters: NWParameters
     private let lock = NSLock()
+    private var resolver: NWConnection?
+    private var group: NWConnectionGroup?
+    private var isCancelled = false
     private var stream: NWConnectionAdapter?
     private var queue: DispatchQueue?
     private var pendingWaitingReport: DispatchWorkItem?
@@ -148,7 +155,8 @@ final class QUICClientConnection: TransportConnection, @unchecked Sendable {
     var betterPathUpdateHandler: (@Sendable (Bool) -> Void)?
 
     init(to endpoint: NWEndpoint, using parameters: NWParameters) {
-        group = NWConnectionGroup(with: NWMultiplexGroup(to: endpoint), using: parameters)
+        self.endpoint = endpoint
+        self.parameters = parameters
     }
 
     var state: TransportConnectionState {
@@ -162,23 +170,86 @@ final class QUICClientConnection: TransportConnection, @unchecked Sendable {
 
     func start(queue: DispatchQueue) {
         lock.withLock { self.queue = queue }
+        report(.preparing)
+        if case .service = endpoint {
+            resolveService(queue: queue)
+        } else {
+            startGroup(to: endpoint, queue: queue)
+        }
+    }
+
+    func cancel() {
+        let (resolver, stream, group) = markCancelled()
+        resolver?.cancel()
+        stream?.cancel()
+        group?.cancel()
+    }
+
+    func forceCancel() {
+        let (resolver, stream, group) = markCancelled()
+        resolver?.cancel()
+        stream?.forceCancel()
+        group?.cancel()
+    }
+
+    private func markCancelled() -> (NWConnection?, NWConnectionAdapter?, NWConnectionGroup?) {
+        lock.withLock {
+            isCancelled = true
+            return (resolver, stream, group)
+        }
+    }
+
+    /// Resolves the Bonjour name with a UDP connection, which is ready as soon as the service
+    /// resolves. It stays `preparing` while the receiver isn't advertising.
+    private func resolveService(queue: DispatchQueue) {
+        let udp = NWParameters.udp
+        udp.includePeerToPeer = parameters.includePeerToPeer
+        let resolver = NWConnection(to: endpoint, using: udp)
+        resolver.stateUpdateHandler = { [weak self, weak resolver] state in
+            guard let self, let resolver else { return }
+            switch state {
+            case .ready:
+                let address = resolver.currentPath?.remoteEndpoint
+                resolver.cancel()
+                guard let address else {
+                    report(.failed(.posix(.EADDRNOTAVAIL)))
+                    return
+                }
+                startGroup(to: address, queue: queue)
+            case .waiting(let error):
+                scheduleWaitingReport(error)
+            case .failed(let error):
+                cancelWaitingReport()
+                report(.failed(TransportNetworkError(error)))
+            default:
+                break
+            }
+        }
+        let started = lock.withLock {
+            guard !isCancelled else { return false }
+            self.resolver = resolver
+            return true
+        }
+        if started {
+            resolver.start(queue: queue)
+        }
+    }
+
+    private func startGroup(to address: NWEndpoint, queue: DispatchQueue) {
+        let group = NWConnectionGroup(with: NWMultiplexGroup(to: address), using: parameters)
         // The receiver never opens streams, but a group won't start without a handler.
         group.newConnectionHandler = { $0.cancel() }
         group.stateUpdateHandler = { [weak self] state in
             self?.handleGroupState(state)
         }
-        report(.preparing)
-        group.start(queue: queue)
-    }
-
-    func cancel() {
-        lock.withLock { stream }?.cancel()
-        group.cancel()
-    }
-
-    func forceCancel() {
-        lock.withLock { stream }?.forceCancel()
-        group.cancel()
+        let started = lock.withLock {
+            guard !isCancelled else { return false }
+            self.group = group
+            return true
+        }
+        if started {
+            group.start(queue: queue)
+        }
     }
 
     func send(content: Data?) async throws {
@@ -219,7 +290,10 @@ final class QUICClientConnection: TransportConnection, @unchecked Sendable {
     }
 
     private func openControlStream() {
-        guard let queue = lock.withLock({ stream == nil ? self.queue : nil }),
+        guard let (queue, group) = lock.withLock({ () -> (DispatchQueue, NWConnectionGroup)? in
+                  guard stream == nil, let queue, let group else { return nil }
+                  return (queue, group)
+              }),
               let connection = NWConnection(from: group) else {
             return
         }
