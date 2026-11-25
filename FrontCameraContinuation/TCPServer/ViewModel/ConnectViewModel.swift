@@ -233,7 +233,7 @@ final class ConnectViewModel {
     var receiverTitle: String {
         isRunning
              ? "Open the iPhone app and send video to \(addressText)."
-             : "Turn on the receiver first, then connect from the iPhone app using the same Wi-Fi network."
+             : "Turn on the receiver first, then connect from the iPhone app on the same Wi-Fi network or nearby."
     }
 
     var previewSubtitle: String {

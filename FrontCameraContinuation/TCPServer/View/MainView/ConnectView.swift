@@ -520,7 +520,7 @@ struct ConnectView: View {
                 }
             }
 
-            Text("iPhones find this Mac as **\(viewModel.receiverName)** on the same Wi-Fi. Manual address: \(viewModel.addressText)")
+            Text("iPhones find this Mac as **\(viewModel.receiverName)** on the same Wi-Fi, or nearby over peer-to-peer Wi-Fi. Manual address: \(viewModel.addressText)")
                 .font(.footnote)
                 .foregroundStyle(palette.secondaryText)
                 .textSelection(.enabled)

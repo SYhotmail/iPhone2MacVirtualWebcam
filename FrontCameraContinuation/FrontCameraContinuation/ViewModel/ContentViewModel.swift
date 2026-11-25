@@ -195,7 +195,7 @@ final class ContentViewModel {
         case .streaming:
             return "Sending the camera feed to your Mac right now."
         case .attentionNeeded:
-            return "We lost the connection before the stream went live. Make sure the Mac receiver is running on the same Wi-Fi, then try again."
+            return "We lost the connection before the stream went live. Make sure the Mac receiver is running and nearby (same Wi-Fi, or Wi-Fi turned on on both), then try again."
         case .pairingNeeded:
             return rejectionReason ?? "Pair this iPhone with your Mac: click Pair iPhone… in the Mac app and scan the code."
         }

@@ -30,7 +30,7 @@ struct PairingQRView: View {
 
             VStack(spacing: 4) {
                 Text("In the iPhone app, tap **Pair with Mac** and scan this code.")
-                Text("The iPhone must be on the same Wi-Fi as **\(invitation.serviceName)**. The code works once and expires in 5 minutes.")
+                Text("The iPhone must be on the same Wi-Fi as **\(invitation.serviceName)**, or nearby with Wi-Fi turned on. The code works once and expires in 5 minutes.")
                     .foregroundStyle(.secondary)
             }
             .font(.callout)

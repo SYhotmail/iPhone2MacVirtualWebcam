@@ -358,7 +358,7 @@ struct ContentView: View {
                 Text(viewModel.pairedMac?.serviceName ?? "No Mac paired")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(primaryTextColor)
-                Text(viewModel.pairedMac == nil ? "Scan the code from the Mac app" : "Found automatically on your Wi-Fi")
+                Text(viewModel.pairedMac == nil ? "Scan the code from the Mac app" : "Found automatically nearby")
                     .font(.caption)
                     .foregroundStyle(secondaryTextColor)
             }

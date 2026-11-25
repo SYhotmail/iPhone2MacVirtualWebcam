@@ -43,6 +43,7 @@ Identity and pairing:
 - The iPhone pins the Mac certificate's SHA-256 fingerprint, learned from the pairing QR code (`PairingInvitation`, `cam2mac://pair?...`).
 - The first packet on every connection is a JSON `PairingHello` (`pair` with a one-time token, or `hello` with the registered secret). The server replies with a `PairingReply` on the same bidirectional QUIC stream and accepts frames only after `ok`. `TCPServer/Model/PairingAuthority.swift` decides.
 - The Mac advertises Bonjour `_cam2mac._udp`. The iPhone connects to the service name, so Mac IP changes don't matter.
+- `includePeerToPeer` is on for both sides (set in `TransportTLSParameters`), so discovery and streaming also work over AWDL without a shared Wi-Fi network.
 - Rebuild both iPhone and Mac apps after changing Transport or TLS code.
 
 ## Networking Behavior

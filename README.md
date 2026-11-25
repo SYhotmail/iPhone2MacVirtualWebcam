@@ -180,7 +180,7 @@ The iPhone app includes a local preview so you can frame the shot before or duri
 You don't type an IP address. The Mac advertises itself over Bonjour (`_cam2mac._udp`) on the local network, and the paired iPhone finds it by name. The Mac's IP can change freely.
 
 - Pairing is done once per iPhone. The QR code holds the Mac's certificate fingerprint and a one-time token that expires after 5 minutes. You can also scan it with the system Camera app, which opens Cam2Mac through the `cam2mac://` link.
-- The iPhone and Mac must be on the same Wi-Fi network. Wi-Fi Aware isn't used because macOS doesn't support it.
+- The iPhone and Mac connect over the same Wi-Fi network, or directly over Apple peer-to-peer Wi-Fi (AWDL, the AirDrop link) when they're nearby with Wi-Fi turned on but not on a shared network. Wi-Fi Aware isn't used because macOS doesn't support it.
 - Paired iPhones are listed in the Mac app, where you can remove them. A removed iPhone is refused until it pairs again.
 - If Bonjour is blocked on your network, open `Manual Address` in the iPhone app and enter the Mac's LAN IP (shown in the Mac app). Pairing is still required.
 
@@ -243,7 +243,7 @@ Use this order for the smoothest setup:
 - Make sure `Cam2Camera.app` is running
 - Make sure the Mac listener is started
 - Confirm the iPhone is using the correct LAN IP address
-- Confirm both devices are on the same network
+- Confirm both devices are on the same network, or nearby with Wi-Fi turned on
 - Confirm the port matches on both sides
 
 ### No video in Zoom

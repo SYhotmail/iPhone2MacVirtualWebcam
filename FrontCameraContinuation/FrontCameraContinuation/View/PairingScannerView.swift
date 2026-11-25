@@ -19,7 +19,7 @@ struct PairingScannerView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                if QRScanner.isScannerSupported {
                     QRScanner(onFound: onFound)
                         .ignoresSafeArea()
                 } else {
@@ -43,6 +43,10 @@ struct PairingScannerView: View {
 
 private struct QRScanner: UIViewControllerRepresentable {
     let onFound: (PairingInvitation) -> Void
+    
+    static var isScannerSupported: Bool {
+        DataScannerViewController.isSupported && DataScannerViewController.isAvailable
+    }
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let scanner = DataScannerViewController(

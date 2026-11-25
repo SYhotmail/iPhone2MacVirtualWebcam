@@ -78,6 +78,17 @@ struct PairingTests {
         #expect(!TransportTLSParameters.leafCertificateMatches(trust: try makeTrust(other), pinnedFingerprint: fingerprint))
     }
 
+    @Test
+    func clientAndServerParametersAllowPeerToPeer() throws {
+        let privateKey = try makeEphemeralKey()
+        let der = try SelfSignedCertificate.make(commonName: "Mac", privateKey: privateKey)
+        let client = TransportTLSParameters.makeClientParameters(pinnedFingerprint: FrameStreamService.fingerprint(ofCertificate: der))
+        #expect(client.includePeerToPeer)
+        #expect(TransportTLSParameters.makeClientParameters(pinnedFingerprint: Data(), transport: .tcp).includePeerToPeer)
+        #expect(client.serviceClass == .interactiveVideo)
+        #expect(TransportTLSParameters.makeClientParameters(pinnedFingerprint: Data(), transport: .tcp).serviceClass == .interactiveVideo)
+    }
+
     private func makeEphemeralKey() throws -> SecKey {
         let attributes: [String: Any] = [
             kSecAttrKeyType as String: kSecAttrKeyTypeECSECPrimeRandom,

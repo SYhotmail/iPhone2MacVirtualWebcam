@@ -58,17 +58,24 @@ public enum TransportTLSParameters {
         transport: TransportNetworkProtocol,
         configure: (sec_protocol_options_t, _ isQUIC: Bool) -> Void
     ) -> NWParameters {
+        let parameters: NWParameters
         switch transport {
         case .tcp:
             let tlsOptions = NWProtocolTLS.Options()
             configure(tlsOptions.securityProtocolOptions, false)
-            return .init(tls: tlsOptions, tcp: .init())
+            parameters = .init(tls: tlsOptions, tcp: .init())
         case let .quic(alpn, direction):
             let quicOptions = NWProtocolQUIC.Options(alpn: alpn)
             quicOptions.direction = direction
             configure(quicOptions.securityProtocolOptions, true)
-            return .init(quic: quicOptions)
+            parameters = .init(quic: quicOptions)
         }
+        // Advertise and connect over Apple peer-to-peer Wi-Fi (AWDL) too, so the
+        // iPhone finds the Mac without a shared Wi-Fi network. Both sides need it.
+        parameters.includePeerToPeer = true
+        // Live camera feed: Wi-Fi video access category and latency-sensitive scheduling.
+        parameters.serviceClass = .interactiveVideo
+        return parameters
     }
 
     private static func quicMinimumTLSVersion(requested: tls_protocol_version_t) -> tls_protocol_version_t {
