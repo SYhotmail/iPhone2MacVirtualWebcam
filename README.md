@@ -203,6 +203,7 @@ The stream transport is configured as:
 - client-side pinning of that certificate's SHA-256 fingerprint, learned from the pairing QR code
 - a private ALPN: `camera-lan-stream`
 - a `PairingHello` handshake as the first packet; the Mac accepts frames only from paired iPhones
+- video frames sent as QUIC datagrams, so a late or lost frame is skipped instead of holding up the frames behind it; the Mac asks the iPhone for a keyframe to recover
 
 The current defaults live in:
 

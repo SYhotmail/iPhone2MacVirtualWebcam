@@ -30,7 +30,7 @@ struct H264EncoderOrderingTests {
     @Test
     func sizeChangeKeepsFrameOrderThroughDecode() async throws {
         let packets = PacketCollector()
-        let encoder = H264Encoder(expectedFrameRate: 30, maxKeyInterval: 30) { packets.append($0) }
+        let encoder = H264Encoder(expectedFrameRate: 30, maxKeyInterval: 30) { packet, isKeyframe in packets.append(packet, isKeyframe: isKeyframe) }
         let landscape = try makePixelBuffer(width: 320, height: 240)
         let portrait = try makePixelBuffer(width: 240, height: 320)
 
@@ -62,6 +62,23 @@ struct H264EncoderOrderingTests {
         #expect(sizes.snapshot().map(\.width) == expectedWidths)
     }
 
+    @Test
+    func forcedKeyframeIsFlaggedAndSentWithParameterSets() async throws {
+        let packets = PacketCollector()
+        let encoder = H264Encoder(expectedFrameRate: 30, maxKeyInterval: 30) { packet, isKeyframe in packets.append(packet, isKeyframe: isKeyframe) }
+        let buffer = try makePixelBuffer(width: 320, height: 240)
+
+        for _ in 0..<3 { encoder.scheduleToEncode(imageBuffer: buffer) }
+        encoder.scheduleToForceKeyframe()
+        for _ in 0..<2 { encoder.scheduleToEncode(imageBuffer: buffer) }
+        await waitUntil { packets.count >= 5 }
+
+        #expect(packets.keyframeFlags() == [true, false, false, true, false])
+        // Keyframes lead with an SPS NAL unit (type 7) so the receiver can resume from them.
+        let startsWithSPS = packets.snapshot().map { $0.count > 4 && $0.starts(with: [0, 0, 0, 1]) && $0[4] & 0x1F == 7 }
+        #expect(startsWithSPS == [true, false, false, true, false])
+    }
+
     private func makePixelBuffer(width: Int, height: Int) throws -> CVPixelBuffer {
         var buffer: CVPixelBuffer?
         let attributes = [kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
@@ -80,9 +97,11 @@ struct H264EncoderOrderingTests {
 private final class PacketCollector: @unchecked Sendable {
     private let lock = NSLock()
     private var packets = [Data]()
-    func append(_ packet: Data) { lock.withLock { packets.append(packet) } }
+    private var flags = [Bool]()
+    func append(_ packet: Data, isKeyframe: Bool) { lock.withLock { packets.append(packet); flags.append(isKeyframe) } }
     var count: Int { lock.withLock { packets.count } }
     func snapshot() -> [Data] { lock.withLock { packets } }
+    func keyframeFlags() -> [Bool] { lock.withLock { flags } }
 }
 
 private final class SizeCollector: @unchecked Sendable {

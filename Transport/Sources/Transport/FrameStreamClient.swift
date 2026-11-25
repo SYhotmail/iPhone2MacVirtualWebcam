@@ -1,10 +1,12 @@
 import Foundation
 import Network
 
-/// Sends packetized frame data to a paired receiver over the configured network transport.
+/// Sends frame data to a paired receiver over the configured network transport.
 ///
 /// After the transport becomes ready the client sends a `PairingHello` and only reports
-/// `.connected` once the receiver accepts it.
+/// `.connected` once the receiver accepts it. Over QUIC, frames then go out as datagrams
+/// (late or lost frames are dropped, not retransmitted) and the stream carries control
+/// messages; over TCP, frames stay on the stream.
 public actor FrameStreamClient {
     public enum Status: Equatable, Sendable {
         case idle
@@ -51,9 +53,14 @@ public actor FrameStreamClient {
             guard let oldValue, oldValue !== connection else {
                 return
             }
+            datagramFlow = nil
             oldValue.cancel()
         }
     }
+    /// Carries video frames once paired; `nil` over TCP.
+    private var datagramFlow: (any TransportDatagramFlow)?
+    private var nextFrameID: UInt32 = 0
+    private var onKeyframeRequested: (@Sendable () -> Void)?
 
     typealias TransportConnectionFactory = @Sendable (Destination) -> any TransportConnection
 
@@ -86,7 +93,12 @@ public actor FrameStreamClient {
                 pinnedFingerprint: destination.pinnedFingerprint,
                 transport: transport
             )
-            return NWConnectionAdapter(connection: NWConnection(to: destination.endpoint, using: parameters))
+            switch transport {
+            case .quic:
+                return QUICClientConnection(to: destination.endpoint, using: parameters)
+            case .tcp:
+                return NWConnectionAdapter(connection: NWConnection(to: destination.endpoint, using: parameters))
+            }
         }
     }
 
@@ -100,6 +112,11 @@ public actor FrameStreamClient {
 
     public func setStatusChangedHandler(_ handler: (@Sendable (Status) -> Void)?) {
         onStatusChanged = handler
+    }
+
+    /// Called when the receiver lost frames and needs a keyframe to recover.
+    public func setKeyframeRequestHandler(_ handler: (@Sendable () -> Void)?) {
+        onKeyframeRequested = handler
     }
 
     public func connect(to destination: Destination) {
@@ -153,15 +170,28 @@ public actor FrameStreamClient {
         connection = nil
     }
 
-    /// Sends a video frame; dropped until the receiver accepted the hello.
-    public func send(_ data: Data) async {
+    /// Sends one encoded frame; dropped until the receiver accepted the hello.
+    ///
+    /// `isKeyframe` lets the receiver resume after a loss: it skips frames until the next keyframe.
+    public func send(_ data: Data, isKeyframe: Bool) async {
         guard let connection, status == .connected else {
             return
         }
 
-        let packet = FramePacket.packetized(data)
         do {
-            try await connection.send(content: packet)
+            if let datagramFlow {
+                let frameID = nextFrameID
+                nextFrameID &+= 1
+                let chunks = VideoDatagram.chunks(
+                    of: data,
+                    frameID: frameID,
+                    isKeyframe: isKeyframe,
+                    maximumDatagramSize: datagramFlow.maximumDatagramSize
+                )
+                chunks.forEach(datagramFlow.send)
+            } else {
+                try await connection.send(content: FramePacket.packetized(data))
+            }
         } catch {
             debugPrint("❌ Error: \(error.localizedDescription)")
         }
@@ -216,10 +246,34 @@ public actor FrameStreamClient {
 
         if reply.ok {
             currentDestination?.hello = destination.hello.afterPairing
+            if let flow = connection.openDatagramFlow() {
+                flow.start(queue: .global(qos: .userInitiated))
+                datagramFlow = flow
+                nextFrameID = 0
+            }
+            listenForControlMessages(on: connection, sourceID: sourceID)
             status = .connected
         } else {
             status = .rejected(reason: reply.reason)
             self.connection = nil
         }
+    }
+
+    /// Reads receiver messages until the stream ends; connection failures are reported by state updates.
+    private func listenForControlMessages(on connection: any TransportConnection, sourceID: ObjectIdentifier) {
+        Task { [weak self] in
+            while let message = try? await FramePacket.read(from: connection, maximumPayloadSize: 64) {
+                guard let self else { return }
+                await self.handleControlMessage(message, sourceID: sourceID)
+            }
+        }
+    }
+
+    private func handleControlMessage(_ message: Data, sourceID: ObjectIdentifier) {
+        guard connectionID == sourceID,
+              message.first.flatMap(StreamControlMessage.init(rawValue:)) == .keyframeRequest else {
+            return
+        }
+        onKeyframeRequested?()
     }
 }

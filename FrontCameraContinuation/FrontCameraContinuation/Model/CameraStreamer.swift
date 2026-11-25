@@ -33,8 +33,12 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     let isConnectedPublisher = CurrentValueSubject<Bool, Never>(false)
     let connectionStatusPublisher = CurrentValueSubject<ConnectionStatus, Never>(.idle)
     let isStreamingRequestedPublisher = CurrentValueSubject<Bool, Never>(false)
+    private struct EncodedPacket {
+        let data: Data
+        let isKeyframe: Bool
+    }
     /// Encoded packets in encoder order; one consumer sends them so H.264 order is kept on the wire.
-    private let outgoingPackets: AsyncStream<Data>.Continuation
+    private let outgoingPackets: AsyncStream<EncodedPacket>.Continuation
     
     var session: AVCaptureSession {
         captureSessionManager.session
@@ -43,7 +47,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
     init(tlsConfiguration: TLSConfiguration = .default) throws {
         let streamClient = FrameStreamClient(transport: tlsConfiguration.transport)
         self.streamClient = streamClient
-        let (packets, continuation) = AsyncStream.makeStream(of: Data.self, bufferingPolicy: .unbounded)
+        let (packets, continuation) = AsyncStream.makeStream(of: EncodedPacket.self, bufferingPolicy: .unbounded)
         self.outgoingPackets = continuation
         super.init()
         Task { [weak self] in
@@ -51,15 +55,15 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
                 guard let self, !Task.isCancelled else {
                     return
                 }
-                await self.streamClient.send(packet)
+                await self.streamClient.send(packet.data, isKeyframe: packet.isKeyframe)
             }
         }
         
         encoder = .init(
             expectedFrameRate: VirtualCameraConfiguration.frameRate,
             maxKeyInterval: VirtualCameraConfiguration.frameRate,
-            outputHandler: { [weak self] data in
-                self?.send(data)
+            outputHandler: { [weak self] data, isKeyframe in
+                self?.send(data, isKeyframe: isKeyframe)
             }
         )
         bind()
@@ -83,6 +87,9 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
 
             await streamClient.setConnectivityChangedHandler { [weak self] isConnected in
                 self?.isConnectedPublisher.value = isConnected
+            }
+            await streamClient.setKeyframeRequestHandler { [weak self] in
+                self?.encoder.scheduleToForceKeyframe()
             }
             await streamClient.setStatusChangedHandler { [weak self] status in
                 self?.connectionStatusPublisher.value = status
@@ -143,8 +150,8 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         disconnect()
     }
 
-    private func send(_ data: Data) {
-        outgoingPackets.yield(data)
+    private func send(_ data: Data, isKeyframe: Bool) {
+        outgoingPackets.yield(EncodedPacket(data: data, isKeyframe: isKeyframe))
     }
 
     private func handleSessionInterrupted(_ reason: AVCaptureSession.InterruptionReason?) {

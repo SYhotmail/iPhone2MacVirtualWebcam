@@ -251,6 +251,65 @@ struct FrameStreamServerTests {
     }
 
     @Test
+    func reassemblesDatagramFramesAfterPairing() async throws {
+        let listener = MockTransportListener()
+        let keyframe = Data(repeating: 1, count: 250)
+        let flow = ServerMockDatagramFlow(datagrams: chunks(keyframe, id: 0, keyframe: true) + chunks(Data([2]), id: 1, keyframe: false))
+        let connection = MockTransportConnection(receiveResults: helloResults(), endsWhenEmpty: false, datagramFlow: flow)
+        let server = await makeAcceptingServer(listener)
+        let frames = FrameCollector()
+        await server.setFrameHandler { frames.append($0) }
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { frames.snapshot().count == 2 }
+
+        #expect(frames.snapshot() == [keyframe, Data([2])])
+        #expect(flow.startCount == 1)
+        #expect(decodedReplies(connection) == [.accepted])
+    }
+
+    @Test
+    func lostDatagramFrameRequestsKeyframeOnStream() async throws {
+        let listener = MockTransportListener()
+        // Frame 1 is lost; frame 2 can't be decoded without it.
+        let flow = ServerMockDatagramFlow(datagrams: chunks(Data([1]), id: 0, keyframe: true) + chunks(Data([3]), id: 2, keyframe: false))
+        let connection = MockTransportConnection(receiveResults: helloResults(), endsWhenEmpty: false, datagramFlow: flow)
+        let server = await makeAcceptingServer(listener)
+        let frames = FrameCollector()
+        await server.setFrameHandler { frames.append($0) }
+        let keyframeRequest = FramePacket.packetized(Data([StreamControlMessage.keyframeRequest.rawValue]))
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { connection.sentPayloads.contains(keyframeRequest) }
+
+        #expect(connection.sentPayloads.contains(keyframeRequest))
+        #expect(frames.snapshot() == [Data([1])])
+    }
+
+    @Test
+    func rejectedHelloDoesNotOpenDatagramFlow() async throws {
+        let listener = MockTransportListener()
+        let flow = ServerMockDatagramFlow(datagrams: [])
+        let badHello = PairingHello.hello(clientID: UUID(), secret: Data(repeating: 1, count: 32))
+        let connection = MockTransportConnection(receiveResults: helloResults(badHello), datagramFlow: flow)
+        let server = await makeAcceptingServer(listener)
+
+        try await server.start(on: 9999)
+        listener.simulateNewConnection(connection)
+        await waitForCondition { connection.startedQueues.count == 1 }
+        connection.simulateState(.ready)
+        await waitForCondition { connection.cancelCallCount == 1 }
+
+        #expect(flow.startCount == 0)
+    }
+
+    @Test
     func advertisesBonjourServiceWhenNamed() async throws {
         let listener = MockTransportListener()
         let server = FrameStreamServer(listenerFactory: { _ in listener })
@@ -277,6 +336,10 @@ private func makeAcceptingServer(_ listener: MockTransportListener) async -> Fra
         hello.secret == validHello.secret ? .accepted : .rejected("bad secret")
     }
     return server
+}
+
+private func chunks(_ frame: Data, id: UInt32, keyframe: Bool) -> [Data] {
+    VideoDatagram.chunks(of: frame, frameID: id, isKeyframe: keyframe, maximumDatagramSize: 110)
 }
 
 private func decodedReplies(_ connection: MockTransportConnection) -> [PairingReply] {
@@ -364,10 +427,16 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
     private(set) var receiveRequests = [ReceiveRequest]()
     private var receiveResults: [Result<Data, Error>]
     private let endsWhenEmpty: Bool
+    private let datagramFlow: ServerMockDatagramFlow?
 
-    init(receiveResults: [Result<Data, Error>], endsWhenEmpty: Bool = true) {
+    init(receiveResults: [Result<Data, Error>], endsWhenEmpty: Bool = true, datagramFlow: ServerMockDatagramFlow? = nil) {
         self.receiveResults = receiveResults
         self.endsWhenEmpty = endsWhenEmpty
+        self.datagramFlow = datagramFlow
+    }
+
+    func openDatagramFlow() -> (any TransportDatagramFlow)? {
+        datagramFlow
     }
 
     func start(queue: DispatchQueue) {
@@ -411,4 +480,40 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
         state = newState
         stateUpdateHandler?(newState)
     }
+}
+
+private final class ServerMockDatagramFlow: @unchecked Sendable, TransportDatagramFlow {
+    let maximumDatagramSize = 110
+    private let lock = NSLock()
+    private var pending: [Data]
+    private var _startCount = 0
+
+    var startCount: Int { lock.withLock { _startCount } }
+
+    init(datagrams: [Data]) {
+        pending = datagrams
+    }
+
+    func start(queue: DispatchQueue) {
+        lock.withLock { _startCount += 1 }
+    }
+
+    func cancel() {}
+
+    func send(_ datagram: Data) {}
+
+    func receive() async throws -> Data {
+        if let next = lock.withLock({ pending.isEmpty ? nil : pending.removeFirst() }) {
+            return next
+        }
+        try await Task.sleep(for: .seconds(60))
+        throw NWError.posix(.ENOTCONN)
+    }
+}
+
+private final class FrameCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var frames = [Data]()
+    func append(_ frame: Data) { lock.withLock { frames.append(frame) } }
+    func snapshot() -> [Data] { lock.withLock { frames } }
 }

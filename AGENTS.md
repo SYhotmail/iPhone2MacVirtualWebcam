@@ -21,14 +21,22 @@ The project currently uses:
 - `QUIC` over `Network.framework`
 - certificate-based TLS
 - a private ALPN: `camera-lan-stream`
-- a stream-style framing layer on top of QUIC
+- one QUIC connection ("tunnel") per session, modeled as an `NWConnectionGroup` with `NWMultiplexGroup`:
+  - one bidirectional stream for pairing and control messages (`FramePacket` framing)
+  - one QUIC datagram flow (RFC 9221) for video frames
 
 Important implications:
 
 - Do not switch ALPN to `h2` or `h3` unless the app actually implements HTTP/2 or HTTP/3.
 - The sender/receiver protocol is custom, not HTTP-based.
-- The server reads a byte stream using `FramePacket` framing.
-- The current QUIC path intentionally behaves like a reliable stream, not lossy datagrams.
+- Video is intentionally lossy: late or lost frames are dropped, never retransmitted. After a loss the receiver skips frames until the next keyframe and asks for one over the stream (`StreamControlMessage.keyframeRequest`, rate-limited to every 500 ms). The encoder also sends a keyframe every second.
+- Each frame is split into datagrams with a 10-byte header (`VideoDatagram`) sized from the flow's `usableDatagramFrameSize` (~1,440 bytes on Wi-Fi; larger datagrams are silently dropped). `FrameReassembler` rebuilds frames on the Mac.
+- Both sides must set `maxDatagramFrameSize` (in `TransportTLSParameters`), or datagram flows stay in `preparing` forever.
+- A datagram flow must be extracted with the group's own QUIC options plus `isDatagram = true` (`NWConnectionGroup.extractDatagramFlow()`); fresh options fail.
+- The client's multiplex group opens an implicit stream that never carries data, so the Mac takes the first stream that becomes ready as the control stream (`QUICTunnelAcceptor`).
+- A client multiplex group briefly reports `waiting` before `ready`; `QUICClientConnection` only reports waits longer than 2 s.
+- The TCP transport (tests, fallback) still sends frames length-prefixed on the stream.
+- `PairingHello.currentVersion` is 2 since frames moved to datagrams; mismatched apps are rejected with a version error.
 
 ## TLS Notes
 
@@ -48,7 +56,7 @@ Identity and pairing:
 
 ## Networking Behavior
 
-The stream framing is length-prefixed:
+The stream framing (pairing, control messages, and TCP frames) is length-prefixed:
 
 - 4-byte header
 - payload bytes
@@ -65,7 +73,7 @@ Behavior:
 
 - If an existing connection has already started streaming frames, a second client is rejected.
 - If an existing connection is stale and never reached real streaming, a new connection may replace it.
-- A connection only counts as streaming after it authenticated and sent a frame.
+- A connection only counts as streaming after it authenticated and sent a frame (a complete frame reassembled from datagrams counts).
 
 This logic lives in:
 
@@ -98,6 +106,8 @@ If you are changing transport or streaming behavior, start here:
 - `Transport/Sources/Transport/NetworkPrimitives.swift`
 - `Transport/Sources/Transport/FrameStreamClient.swift`
 - `Transport/Sources/Transport/FrameStreamServer.swift`
+- `Transport/Sources/Transport/QUICTunnel.swift`
+- `Transport/Sources/Transport/VideoDatagram.swift`
 - `Transport/Sources/Transport/TransportTLSParameters.swift`
 - `FrontCameraContinuation/Shared/TLSConfiguration.swift`
 

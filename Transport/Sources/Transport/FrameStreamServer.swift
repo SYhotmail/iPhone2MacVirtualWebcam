@@ -12,10 +12,11 @@ public final class FrameStreamServerState: @unchecked Sendable {
     public init() {}
 }
 
-/// Receives packetized frame data from a single client over the configured network transport.
+/// Receives frame data from a single client over the configured network transport.
 ///
 /// Every connection must first send a `PairingHello`; frames are only accepted after the
-/// injected authorizer approves it.
+/// injected authorizer approves it. Over QUIC, frames arrive as datagrams and are reassembled
+/// with `FrameReassembler`; over TCP, they arrive length-prefixed on the stream.
 public actor FrameStreamServer {
     public typealias HelloAuthorizer = @Sendable (PairingHello) async -> PairingReply
 
@@ -38,6 +39,9 @@ public actor FrameStreamServer {
     private var inactivityTimers = [ObjectIdentifier: DispatchWorkItem]()
     private var streamingConnectionIDs = Set<ObjectIdentifier>()
     private let inactivityTimeout: TimeInterval = 2
+    /// The sender also sends a keyframe every second; this keeps a lossy burst from flooding requests.
+    private let keyframeRequestInterval: Duration = .milliseconds(500)
+    private var lastKeyframeRequest: ContinuousClock.Instant?
     private let connectionQueue = DispatchQueue.global(qos: .userInitiated)
     typealias TransportListenerFactory = @Sendable (NWEndpoint.Port) throws -> any TransportListener
     public typealias NWListenerFactory = @Sendable (NWEndpoint.Port) throws -> NWListener
@@ -208,6 +212,12 @@ public actor FrameStreamServer {
             return
         }
 
+        // Open the datagram flow before replying, so it exists when the client's first frame arrives.
+        if reply.ok, let datagramFlow = connection.openDatagramFlow() {
+            datagramFlow.start(queue: connectionQueue)
+            receiveDatagrams(from: datagramFlow, for: connection)
+        }
+
         do {
             try await connection.send(content: FramePacket.packetized(JSONEncoder().encode(reply)))
         } catch {
@@ -250,10 +260,58 @@ public actor FrameStreamServer {
     }
 
     private func finishReceivingFrame(_ frame: Data, from connection: any TransportConnection) {
+        deliver(frame, from: connection)
+        receive(from: connection)
+    }
+
+    private func deliver(_ frame: Data, from connection: any TransportConnection) {
         streamingConnectionIDs.insert(ObjectIdentifier(connection))
         scheduleInactivityTimeout(for: connection)
         onFrame?(frame)
-        receive(from: connection)
+    }
+
+    /// Reassembles datagram frames until the flow ends or the connection is closed.
+    private func receiveDatagrams(from flow: any TransportDatagramFlow, for connection: any TransportConnection) {
+        let connectionID = ObjectIdentifier(connection)
+        Task { [weak self] in
+            var reassembler = FrameReassembler()
+            while let datagram = try? await flow.receive() {
+                guard let self, await self.handle(reassembler.add(datagram), connectionID: connectionID) else {
+                    break
+                }
+            }
+            flow.cancel()
+        }
+    }
+
+    /// Returns `false` once the connection is gone.
+    private func handle(_ event: FrameReassembler.Event, connectionID: ObjectIdentifier) -> Bool {
+        guard let connection = connection(matching: connectionID) else {
+            return false
+        }
+        switch event {
+        case .none:
+            break
+        case .frame(let frame):
+            deliver(frame, from: connection)
+        case .needsKeyframe:
+            // Frames still arrive, so the client is alive.
+            scheduleInactivityTimeout(for: connection)
+            requestKeyframe(from: connection)
+        }
+        return true
+    }
+
+    private func requestKeyframe(from connection: any TransportConnection) {
+        let now = ContinuousClock.now
+        if let lastKeyframeRequest, now - lastKeyframeRequest < keyframeRequestInterval {
+            return
+        }
+        lastKeyframeRequest = now
+        let message = FramePacket.packetized(Data([StreamControlMessage.keyframeRequest.rawValue]))
+        Task {
+            try? await connection.send(content: message)
+        }
     }
 
     private func scheduleInactivityTimeout(for connection: any TransportConnection) {

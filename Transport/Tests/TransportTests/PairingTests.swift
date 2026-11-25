@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Security
 import Testing
 @testable import Transport
@@ -36,7 +37,7 @@ struct PairingTests {
         let json = try #require(String(data: JSONEncoder().encode(hello), encoding: .utf8))
 
         #expect(json.contains("\"type\":\"hello\""))
-        #expect(json.contains("\"v\":1"))
+        #expect(json.contains("\"v\":\(PairingHello.currentVersion)"))
         #expect(try JSONDecoder().decode(PairingHello.self, from: Data(json.utf8)) == hello)
     }
 
@@ -86,6 +87,8 @@ struct PairingTests {
         #expect(client.includePeerToPeer)
         #expect(TransportTLSParameters.makeClientParameters(pinnedFingerprint: Data(), transport: .tcp).includePeerToPeer)
         #expect(client.serviceClass == .interactiveVideo)
+        let quic = try #require(client.defaultProtocolStack.transportProtocol as? NWProtocolQUIC.Options)
+        #expect(quic.maxDatagramFrameSize > 0, "Datagram flows never become ready without this")
         #expect(TransportTLSParameters.makeClientParameters(pinnedFingerprint: Data(), transport: .tcp).serviceClass == .interactiveVideo)
     }
 

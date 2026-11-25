@@ -3,7 +3,9 @@ import QuartzCore
 import VideoToolbox
 
 public actor H264Encoder {
-    public typealias OutputHandler = @Sendable (Data) -> Void
+    /// Receives each encoded access unit in decode order, and whether it is a keyframe
+    /// (a sync frame carrying SPS/PPS, decodable on its own).
+    public typealias OutputHandler = @Sendable (_ packet: Data, _ isKeyframe: Bool) -> Void
 
     /// `CVImageBuffer` is a CF type and not modeled as `Sendable`, but we hand off
     /// retained buffer references from the capture callback to the encoder actor.
@@ -19,12 +21,14 @@ public actor H264Encoder {
     private var compressionSession: VTCompressionSession?
     private var sentConfig = false
     private var frameIndex = 0
+    private var forceNextKeyframe = false
     private var encodedSize: CGSize = .zero
 
     private let outputHandler: OutputHandler
 
     private enum Command: Sendable {
         case encode(SendableImageBuffer, size: CGSize)
+        case forceKeyframe
         case invalidate
     }
 
@@ -59,6 +63,8 @@ public actor H264Encoder {
         switch command {
         case let .encode(imageBuffer, size):
             encode(imageBuffer, newSize: size)
+        case .forceKeyframe:
+            forceNextKeyframe = true
         case .invalidate:
             invalidate()
         }
@@ -68,6 +74,11 @@ public actor H264Encoder {
         let width = CVPixelBufferGetWidth(imageBuffer)
         let height = CVPixelBufferGetHeight(imageBuffer)
         commands.yield(.encode(SendableImageBuffer(value: imageBuffer), size: CGSize(width: width, height: height)))
+    }
+
+    /// Makes the next encoded frame a keyframe, e.g. after the receiver lost frames.
+    nonisolated public func scheduleToForceKeyframe() {
+        commands.yield(.forceKeyframe)
     }
 
     @discardableResult
@@ -80,7 +91,8 @@ public actor H264Encoder {
 
         let pts = CMTime(value: CMTimeValue(CACurrentMediaTime() * 1000), timescale: 1000)
         frameIndex += 1
-        let shouldForceKeyframe = frameIndex % maxKeyInterval == 0
+        let shouldForceKeyframe = forceNextKeyframe || frameIndex % maxKeyInterval == 0
+        forceNextKeyframe = false
         let frameProperties = shouldForceKeyframe
             ? [kVTEncodeFrameOptionKey_ForceKeyFrame: true]
             : nil
@@ -102,7 +114,8 @@ public actor H264Encoder {
                 return
             }
 
-            let shouldSendConfig = firstParam || Self.shouldSendConfig(for: sampleBuffer)
+            let isKeyframe = Self.shouldSendConfig(for: sampleBuffer)
+            let shouldSendConfig = firstParam || isKeyframe
             let formatDesc = shouldSendConfig ? CMSampleBufferGetFormatDescription(sampleBuffer) : nil
 
             guard let packetData = Self.makeAccessUnitPacket(
@@ -115,7 +128,7 @@ public actor H264Encoder {
 
             // VideoToolbox calls this in decode order for a session; deliver
             // synchronously so packets keep that order.
-            outputHandler(packetData)
+            outputHandler(packetData, isKeyframe)
         }
 
         if res == noErr {

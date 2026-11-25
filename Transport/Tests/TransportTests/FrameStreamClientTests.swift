@@ -45,7 +45,7 @@ struct FrameStreamClientTests {
         mockConnection.simulateState(.ready)
         #expect(await recorder.waitForCount(2) == [.connecting, .connected])
 
-        await manager.send(Data([0x01, 0x02, 0x03]))
+        await manager.send(Data([0x01, 0x02, 0x03]), isKeyframe: true)
 
         let sent = mockConnection.sentPayloads
         #expect(sent.count == 2)
@@ -59,7 +59,7 @@ struct FrameStreamClientTests {
         let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
 
         await manager.connect(to: Self.destination)
-        await manager.send(Data([0x01]))
+        await manager.send(Data([0x01]), isKeyframe: true)
 
         #expect(mockConnection.sentPayloads.isEmpty)
     }
@@ -108,6 +108,55 @@ struct FrameStreamClientTests {
         #expect(created[0].destination.hello.kind == .pair)
         #expect(created[1].destination.hello == .hello(clientID: Self.pairHello.clientID, secret: Self.pairHello.secret))
         #expect(created[1].destination.endpoint == Self.destination.endpoint)
+    }
+
+    @Test
+    func sendsFramesAsDatagramChunksWhenTunnelHasDatagramFlow() async throws {
+        let flow = MockDatagramFlow(maximumDatagramSize: 110)
+        let mockConnection = MockTransportConnection(replies: [.accepted], datagramFlow: flow)
+        let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
+        let recorder = StatusRecorder()
+        await manager.setStatusChangedHandler { status in
+            Task { await recorder.append(status) }
+        }
+
+        await manager.connect(to: Self.destination)
+        mockConnection.simulateState(.ready)
+        _ = await recorder.waitForCount(2)
+        let keyframe = Data(repeating: 1, count: 250)
+        await manager.send(keyframe, isKeyframe: true)
+        await manager.send(Data([2]), isKeyframe: false)
+
+        #expect(flow.startCount == 1)
+        #expect(mockConnection.sentPayloads.count == 1) // only the hello on the stream
+        let parsed = try flow.sent.map { try #require(VideoDatagram.parse($0)) }
+        #expect(parsed.map(\.header) == [
+            .init(frameID: 0, chunkIndex: 0, chunkCount: 3, isKeyframe: true),
+            .init(frameID: 0, chunkIndex: 1, chunkCount: 3, isKeyframe: true),
+            .init(frameID: 0, chunkIndex: 2, chunkCount: 3, isKeyframe: true),
+            .init(frameID: 1, chunkIndex: 0, chunkCount: 1, isKeyframe: false),
+        ])
+        #expect(parsed.prefix(3).reduce(into: Data()) { $0.append($1.payload) } == keyframe)
+    }
+
+    @Test
+    func keyframeRequestOnStreamCallsHandler() async {
+        let keyframeRequest = FramePacket.packetized(Data([StreamControlMessage.keyframeRequest.rawValue]))
+        let mockConnection = MockTransportConnection(replies: [.accepted], trailingStreamData: keyframeRequest)
+        let manager = FrameStreamClient(connectionFactory: { _ in mockConnection })
+        let requests = RequestCounter()
+        await manager.setKeyframeRequestHandler {
+            requests.increment()
+        }
+
+        await manager.connect(to: Self.destination)
+        mockConnection.simulateState(.ready)
+
+        let deadline = ContinuousClock.now + .seconds(1)
+        while requests.count == 0, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(requests.count == 1)
     }
 
     @Test
@@ -176,10 +225,18 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
     var cancelCallCount: Int { lock.withLock { _cancelCallCount } }
     var sentPayloads: [Data] { lock.withLock { _sentPayloads } }
 
-    init(replies: [PairingReply] = []) {
+    private let datagramFlow: MockDatagramFlow?
+
+    init(replies: [PairingReply] = [], trailingStreamData: Data = Data(), datagramFlow: MockDatagramFlow? = nil) {
         pendingReceive = replies.reduce(into: Data()) { buffer, reply in
             buffer.append(FramePacket.packetized(try! JSONEncoder().encode(reply)))
         }
+        pendingReceive.append(trailingStreamData)
+        self.datagramFlow = datagramFlow
+    }
+
+    func openDatagramFlow() -> (any TransportDatagramFlow)? {
+        datagramFlow
     }
 
     func start(queue: DispatchQueue) {
@@ -211,4 +268,39 @@ private final class MockTransportConnection: @unchecked Sendable, TransportConne
         state = newState
         stateUpdateHandler?(newState)
     }
+}
+
+private final class MockDatagramFlow: @unchecked Sendable, TransportDatagramFlow {
+    let maximumDatagramSize: Int
+    private let lock = NSLock()
+    private var _sent = [Data]()
+    private var _startCount = 0
+
+    var sent: [Data] { lock.withLock { _sent } }
+    var startCount: Int { lock.withLock { _startCount } }
+
+    init(maximumDatagramSize: Int) {
+        self.maximumDatagramSize = maximumDatagramSize
+    }
+
+    func start(queue: DispatchQueue) {
+        lock.withLock { _startCount += 1 }
+    }
+
+    func cancel() {}
+
+    func send(_ datagram: Data) {
+        lock.withLock { _sent.append(datagram) }
+    }
+
+    func receive() async throws -> Data {
+        throw NWError.posix(.ENOTCONN)
+    }
+}
+
+private final class RequestCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+    var count: Int { lock.withLock { value } }
+    func increment() { lock.withLock { value += 1 } }
 }

@@ -3,6 +3,9 @@ import Network
 import Security
 
 public enum TransportTLSParameters {
+    /// Largest QUIC datagram frame this side accepts; the path MTU limits real datagrams further.
+    static let maximumDatagramFrameSize = 65535
+
     /// Client parameters that accept only the server certificate whose SHA-256 matches `pinnedFingerprint`.
     nonisolated public static func makeClientParameters(
         pinnedFingerprint: Data,
@@ -67,6 +70,8 @@ public enum TransportTLSParameters {
         case let .quic(alpn, direction):
             let quicOptions = NWProtocolQUIC.Options(alpn: alpn)
             quicOptions.direction = direction
+            // Advertise datagram support (RFC 9221); video frames travel as datagrams.
+            quicOptions.maxDatagramFrameSize = Self.maximumDatagramFrameSize
             configure(quicOptions.securityProtocolOptions, true)
             parameters = .init(quic: quicOptions)
         }

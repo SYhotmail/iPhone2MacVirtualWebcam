@@ -40,17 +40,42 @@ protocol TransportConnection: AnyObject, Sendable {
     func forceCancel()
     func send(content: Data?) async throws
     func receive(minimumIncompleteLength: Int, maximumLength: Int) async throws -> TransportReceiveResult
+    /// The QUIC datagram flow sharing this connection's tunnel, opened on first call.
+    /// `nil` for transports without datagrams (TCP); frames then travel on the stream.
+    func openDatagramFlow() -> (any TransportDatagramFlow)?
+}
+
+extension TransportConnection {
+    func openDatagramFlow() -> (any TransportDatagramFlow)? {
+        nil
+    }
+}
+
+/// Unreliable, unordered messages that share a QUIC connection with the control stream.
+protocol TransportDatagramFlow: AnyObject, Sendable {
+    /// Largest datagram the current path carries.
+    var maximumDatagramSize: Int { get }
+
+    func start(queue: DispatchQueue)
+    func cancel()
+    /// Queues one datagram without waiting; datagrams may be dropped.
+    func send(_ datagram: Data)
+    func receive() async throws -> Data
 }
 
 final class NWConnectionAdapter: TransportConnection {
     private let connection: NWConnection
+    /// The QUIC tunnel this stream belongs to; cancelled with the stream.
+    private let group: NWConnectionGroup?
+    /// Network.framework already started the connection (accepted QUIC streams).
+    private let isStarted: Bool
+    private let datagramFlowLock = NSLock()
+    private var datagramFlow: NWDatagramFlowAdapter?
 
-    init(connection: NWConnection) {
+    init(connection: NWConnection, group: NWConnectionGroup? = nil, isStarted: Bool = false) {
         self.connection = connection
-    }
-
-    fileprivate var rawConnection: NWConnection {
-        connection
+        self.group = group
+        self.isStarted = isStarted
     }
 
     var state: TransportConnectionState {
@@ -89,15 +114,40 @@ final class NWConnectionAdapter: TransportConnection {
     }
 
     func start(queue: DispatchQueue) {
-        connection.start(queue: queue)
+        guard isStarted else {
+            connection.start(queue: queue)
+            return
+        }
+        // Already running: report the current state as a fresh start would.
+        let handler = stateUpdateHandler
+        let state = state
+        queue.async {
+            handler?(state)
+        }
     }
 
     func cancel() {
         connection.cancel()
+        closeTunnel()
     }
 
     func forceCancel() {
         connection.forceCancel()
+        closeTunnel()
+    }
+
+    private func closeTunnel() {
+        datagramFlowLock.withLock { datagramFlow }?.cancel()
+        group?.cancel()
+    }
+
+    func openDatagramFlow() -> (any TransportDatagramFlow)? {
+        datagramFlowLock.withLock {
+            if datagramFlow == nil, let flow = group?.extractDatagramFlow() {
+                datagramFlow = NWDatagramFlowAdapter(connection: flow)
+            }
+            return datagramFlow
+        }
     }
 
     func send(content: Data?) async throws {
@@ -150,9 +200,14 @@ protocol TransportListener: AnyObject, Sendable {
 
 final class NWListenerAdapter: TransportListener {
     private let listener: NWListener
+    /// QUIC listeners accept whole tunnels (stream + datagram flow) instead of single streams.
+    private let acceptsQUICTunnels: Bool
+    private let tunnelQueue = DispatchQueue(label: "transport.quic.tunnels")
+    private var connectionHandler: (@Sendable (any TransportConnection) -> Void)?
 
     init(listener: NWListener) {
         self.listener = listener
+        self.acceptsQUICTunnels = listener.parameters.defaultProtocolStack.transportProtocol is NWProtocolQUIC.Options
     }
 
     var state: TransportListenerState {
@@ -176,19 +231,19 @@ final class NWListenerAdapter: TransportListener {
     }
 
     var newConnectionHandler: (@Sendable (any TransportConnection) -> Void)? {
-        get {
-            guard let handler = listener.newConnectionHandler else {
-                return nil
-            }
-            return { connection in
-                if let connection = connection as? NWConnectionAdapter {
-                    handler(connection.rawConnection)
-                }
-            }
-        }
+        get { connectionHandler }
         set {
-            listener.newConnectionHandler = { connection in
-                newValue?(NWConnectionAdapter(connection: connection))
+            connectionHandler = newValue
+            if acceptsQUICTunnels {
+                listener.newConnectionGroupHandler = { [tunnelQueue] group in
+                    QUICTunnelAcceptor(group: group, queue: tunnelQueue) { stream in
+                        newValue?(stream)
+                    }.start()
+                }
+            } else {
+                listener.newConnectionHandler = { connection in
+                    newValue?(NWConnectionAdapter(connection: connection))
+                }
             }
         }
     }
