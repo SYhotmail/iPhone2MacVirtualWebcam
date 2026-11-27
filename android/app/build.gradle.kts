@@ -31,6 +31,15 @@ android {
     buildFeatures {
         compose = true
     }
+
+    testOptions {
+        unitTests.all {
+            // Golden protocol cases shared with the Swift tests (see ProtocolFixtures/README.md).
+            val fixtures = rootProject.file("../ProtocolFixtures")
+            it.systemProperty("protocolFixtures", fixtures.absolutePath)
+            it.inputs.dir(fixtures)
+        }
+    }
 }
 
 kotlin {

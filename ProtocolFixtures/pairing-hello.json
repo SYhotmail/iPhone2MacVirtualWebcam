@@ -1,0 +1,33 @@
+{
+  "_doc": "PairingHello: build the hello from the inputs, encode it, and compare the parsed JSON with `json` (key order and escaping are free).",
+  "cases": [
+    {
+      "name": "pair",
+      "kind": "pair",
+      "clientID": "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+      "secretHex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "tokenHex": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "deviceName": "Siarhei’s Pixel 8 / “Pro”",
+      "json": {
+        "v": 3,
+        "type": "pair",
+        "clientID": "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+        "secret": "//79/Pv6+fj39vX08/Lx8O/u7ezr6uno5+bl5OPi4eA=",
+        "token": "xMTExMTExMTExMTExMTExA==",
+        "name": "Siarhei’s Pixel 8 / “Pro”"
+      }
+    },
+    {
+      "name": "hello",
+      "kind": "hello",
+      "clientID": "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+      "secretHex": "fffefdfcfbfaf9f8f7f6f5f4f3f2f1f0efeeedecebeae9e8e7e6e5e4e3e2e1e0",
+      "json": {
+        "v": 3,
+        "type": "hello",
+        "clientID": "0F1E2D3C-4B5A-6978-8796-A5B4C3D2E1F0",
+        "secret": "//79/Pv6+fj39vX08/Lx8O/u7ezr6uno5+bl5OPi4eA="
+      }
+    }
+  ]
+}

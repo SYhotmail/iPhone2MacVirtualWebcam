@@ -82,6 +82,10 @@ This logic lives in:
 
 - `Transport/Sources/Transport/FrameStreamServer.swift`
 
+## Protocol Fixtures
+
+`ProtocolFixtures/` holds golden wire-protocol cases (pairing hello/reply JSON, QR invitation URLs, stream framing, Annex-B start codes). The Swift tests (`Transport/Tests/TransportTests/ProtocolFixtureTests.swift`, `H264/Tests/H264Tests/AnnexBFixtureTests.swift`) and the Android tests (`ProtocolFixtureTest.kt`) both read them. When changing the protocol, update the fixture and both implementations together.
+
 ## Build and Test
 
 Useful package-level test command:
