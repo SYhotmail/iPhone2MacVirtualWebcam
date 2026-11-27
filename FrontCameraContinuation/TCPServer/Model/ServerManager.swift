@@ -46,14 +46,10 @@ final class ServerManager: @unchecked Sendable {
          pairingAuthority: PairingAuthority = PairingAuthority()) throws {
         let serviceName = Host.current().localizedName ?? "Cam2Mac"
         let identity = try MacIdentityStore.loadOrCreate(commonName: serviceName)
-        let quicParameters = try tlsConfiguration.makeServerParameters(identity: identity.identity)
-        // Android has no QUIC datagram API, so it streams over TLS/TCP with the same identity.
-        let tcpParameters = try TLSConfiguration(transport: .tcp).makeServerParameters(identity: identity.identity)
-        self.streamServer = FrameStreamServer(listenerBuilders: [
-            { port in try NWListener(using: quicParameters, on: port) },
-            // Bonjour carries the port, so the TCP listener takes any free one.
-            { _ in try NWListener(using: tcpParameters) },
-        ])
+        let parameters = try tlsConfiguration.makeServerParameters(identity: identity.identity)
+        self.streamServer = FrameStreamServer { port in
+            return try NWListener(using: parameters, on: port)
+        }
         self.pairingAuthority = pairingAuthority
         self.certificateFingerprint = identity.fingerprint
         self.preferredServiceName = serviceName

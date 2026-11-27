@@ -119,6 +119,39 @@ struct ProtocolFixtureTests {
         }
         #expect(StreamControlMessage.keyframeRequest.rawValue == 0x01)
     }
+
+    private struct DatagramCase: Decodable {
+        var name: String
+        var frameHex: String
+        var frameID: UInt32
+        var isKeyframe: Bool
+        var maximumDatagramSize: Int
+        var datagramsHex: [String]
+    }
+
+    @Test
+    func videoDatagramsMatchFixtures() throws {
+        let cases = try loadFixture("video-datagram.json", key: "cases", as: [DatagramCase].self)
+        #expect(!cases.isEmpty)
+        for fixture in cases {
+            let frame = try #require(Data(hex: fixture.frameHex))
+            let expected = try fixture.datagramsHex.map { try #require(Data(hex: $0)) }
+            let datagrams = VideoDatagram.chunks(
+                of: frame,
+                frameID: fixture.frameID,
+                isKeyframe: fixture.isKeyframe,
+                maximumDatagramSize: fixture.maximumDatagramSize
+            )
+            #expect(datagrams == expected, "\(fixture.name)")
+
+            // The Mac's reassembler must rebuild what the senders produce.
+            var reassembler = FrameReassembler()
+            let events = expected.map { reassembler.add($0) }
+            if fixture.isKeyframe, !expected.isEmpty {
+                #expect(events.last == .frame(frame), "\(fixture.name)")
+            }
+        }
+    }
 }
 
 /// Any JSON value, compared structurally (key order and escaping don't matter).
