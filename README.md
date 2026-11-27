@@ -214,6 +214,21 @@ The current defaults live in:
 
 If you change Transport networking code, rebuild both the iPhone app and the Mac app.
 
+## Android Sender
+
+`android/` holds a native Android sender (Kotlin, Jetpack Compose, Android 10+). Android has no QUIC datagram API, so it streams over TLS 1.3 on TCP instead:
+
+- Pairing uses the same QR code; the phone pins the Mac certificate's SHA-256 and sends the same `PairingHello`.
+- It finds the Mac through Bonjour `_cam2mac._tcp` (same service name as the QUIC listener), so the phone and the Mac must share a Wi-Fi network (no AWDL).
+- Video is HEVC from the hardware encoder (720x1280, 30 fps), sent as length-prefixed packets on the TLS stream. Phones without an HEVC encoder are not supported.
+- The Mac app needs its TLS/TCP listener for this to work end to end.
+
+Build and test with JDK 17 and the Android SDK (API 36):
+
+```bash
+cd android && ./gradlew :app:testDebugUnitTest :app:assembleDebug
+```
+
 ## Using the Virtual Camera in Zoom
 
 After `Cam2Camera` is running, the virtual camera is installed, and the iPhone stream is active:
