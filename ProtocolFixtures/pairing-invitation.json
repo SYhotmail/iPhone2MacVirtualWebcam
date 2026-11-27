@@ -1,0 +1,69 @@
+{
+  "_doc": "PairingInvitation (the Mac's QR code). `valid` URLs are exactly what the Mac generates and must parse to the given fields; `invalid` URLs must be rejected.",
+  "valid": [
+    {
+      "url": "cam2mac://pair?fp=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f&t=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4&n=Studio%20Mac",
+      "fingerprintHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tokenHex": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "serviceName": "Studio Mac"
+    },
+    {
+      "url": "cam2mac://pair?fp=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f&t=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4&n=Studio%20Mac%20%26%20Co",
+      "fingerprintHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tokenHex": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "serviceName": "Studio Mac & Co"
+    },
+    {
+      "url": "cam2mac://pair?fp=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f&t=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4&n=C++%20Mac",
+      "fingerprintHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tokenHex": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "serviceName": "C++ Mac"
+    },
+    {
+      "url": "cam2mac://pair?fp=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f&t=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4&n=Siarhei%E2%80%99s%20MacBook%20Pro",
+      "fingerprintHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tokenHex": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "serviceName": "Siarhei’s MacBook Pro"
+    },
+    {
+      "url": "cam2mac://pair?fp=000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f&t=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4&n=a%3Db?c%23d/e",
+      "fingerprintHex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+      "tokenHex": "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4",
+      "serviceName": "a=b?c#d/e"
+    }
+  ],
+  "invalid": [
+    {
+      "url": "https://pair?fp=00&t=00&n=x",
+      "why": "wrong scheme"
+    },
+    {
+      "url": "cam2mac://other?fp=0000000000000000000000000000000000000000000000000000000000000000&t=00000000000000000000000000000000&n=Mac",
+      "why": "wrong host"
+    },
+    {
+      "url": "cam2mac://pair?fp=zz&t=00000000000000000000000000000000&n=Mac",
+      "why": "fingerprint not hex"
+    },
+    {
+      "url": "cam2mac://pair?fp=00000000000000000000000000000000000000000000000000000000000000&t=00000000000000000000000000000000&n=Mac",
+      "why": "fingerprint 31 bytes"
+    },
+    {
+      "url": "cam2mac://pair?fp=00000000000000000000000000000000000000000000000000000000000000000&t=00000000000000000000000000000000&n=Mac",
+      "why": "fingerprint odd hex length"
+    },
+    {
+      "url": "cam2mac://pair?fp=0000000000000000000000000000000000000000000000000000000000000000&t=000000000000000000000000000000&n=Mac",
+      "why": "token 15 bytes"
+    },
+    {
+      "url": "cam2mac://pair?fp=0000000000000000000000000000000000000000000000000000000000000000&t=00000000000000000000000000000000",
+      "why": "no service name"
+    },
+    {
+      "url": "cam2mac://pair?fp=0000000000000000000000000000000000000000000000000000000000000000&t=00000000000000000000000000000000&n=",
+      "why": "empty service name"
+    }
+  ]
+}

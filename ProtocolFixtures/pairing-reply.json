@@ -1,0 +1,23 @@
+{
+  "_doc": "PairingReply: decode `json` and expect `ok`/`reason`. Cases with `encoded: true` are also what the Mac encodes.",
+  "cases": [
+    {
+      "json": "{\"ok\":true}",
+      "ok": true,
+      "reason": null,
+      "encoded": true
+    },
+    {
+      "json": "{\"ok\":false,\"reason\":\"Unsupported protocol version 2\"}",
+      "ok": false,
+      "reason": "Unsupported protocol version 2",
+      "encoded": true
+    },
+    {
+      "json": "{\"reason\":\"Pairing code expired or already used\",\"ok\":false,\"extra\":1}",
+      "ok": false,
+      "reason": "Pairing code expired or already used",
+      "encoded": false
+    }
+  ]
+}

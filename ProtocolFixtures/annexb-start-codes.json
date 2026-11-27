@@ -1,0 +1,42 @@
+{
+  "_doc": "HEVC access units on the wire. The sender widens 3-byte start codes to 4 bytes (input -> normalized); the Mac splits `normalized` into `nalUnits` (each with its start code).",
+  "cases": [
+    {
+      "name": "four-byte codes stay",
+      "inputHex": "0000000140010c00000001420101000000012601af",
+      "normalizedHex": "0000000140010c00000001420101000000012601af",
+      "nalUnitsHex": [
+        "0000000140010c",
+        "00000001420101",
+        "000000012601af"
+      ]
+    },
+    {
+      "name": "three-byte codes between units",
+      "inputHex": "0000000140010c0000014201010000012601af",
+      "normalizedHex": "0000000140010c00000001420101000000012601af",
+      "nalUnitsHex": [
+        "0000000140010c",
+        "00000001420101",
+        "000000012601af"
+      ]
+    },
+    {
+      "name": "three-byte code first",
+      "inputHex": "00000140010c000000012601af",
+      "normalizedHex": "0000000140010c000000012601af",
+      "nalUnitsHex": [
+        "0000000140010c",
+        "000000012601af"
+      ]
+    },
+    {
+      "name": "emulation prevention untouched",
+      "inputHex": "00000001260100000301ff",
+      "normalizedHex": "00000001260100000301ff",
+      "nalUnitsHex": [
+        "00000001260100000301ff"
+      ]
+    }
+  ]
+}
