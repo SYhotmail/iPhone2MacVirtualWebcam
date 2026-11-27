@@ -189,6 +189,8 @@ protocol TransportListener: AnyObject, Sendable {
     var state: TransportListenerState { get }
     var stateUpdateHandler: (@Sendable (TransportListenerState) -> Void)? { get set }
     var newConnectionHandler: (@Sendable (any TransportConnection) -> Void)? { get set }
+    /// Bonjour service type matching this listener's transport (`_cam2mac._udp` or `_cam2mac._tcp`).
+    var serviceType: String { get }
     /// Bonjour service to advertise; must be set before `start`.
     var service: NWListener.Service? { get set }
     /// Called with the service name actually registered (Bonjour may rename on conflicts).
@@ -246,6 +248,10 @@ final class NWListenerAdapter: TransportListener {
                 }
             }
         }
+    }
+
+    var serviceType: String {
+        acceptsQUICTunnels ? FrameStreamService.type : FrameStreamService.tcpType
     }
 
     var service: NWListener.Service? {

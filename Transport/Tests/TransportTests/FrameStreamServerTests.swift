@@ -321,6 +321,120 @@ struct FrameStreamServerTests {
         #expect(listener.service?.type == FrameStreamService.type)
         #expect(server.state.advertisedServiceName.value == "Studio Mac (2)")
     }
+
+    // MARK: - Several listeners (QUIC for iPhone, TLS/TCP for Android)
+
+    @Test
+    func startsEveryListenerAdvertisingItsOwnServiceType() async throws {
+        let quic = MockTransportListener(serviceType: FrameStreamService.type)
+        let tcp = MockTransportListener(serviceType: FrameStreamService.tcpType)
+        let server = FrameStreamServer(listenerFactories: [{ _ in quic }, { _ in tcp }])
+
+        try await server.start(on: 9999, serviceName: "Mac")
+
+        #expect(quic.startedQueues.count == 1)
+        #expect(tcp.startedQueues.count == 1)
+        #expect(quic.service == NWListener.Service(name: "Mac", type: "_cam2mac._udp"))
+        #expect(tcp.service == NWListener.Service(name: "Mac", type: "_cam2mac._tcp"))
+        #expect(quic.serviceNameRegisteredHandler != nil)
+        #expect(tcp.serviceNameRegisteredHandler == nil)
+    }
+
+    @Test
+    func listenerCreationFailureStartsNoListener() async {
+        struct ListenerCreationError: Error {}
+        let quic = MockTransportListener()
+        let server = FrameStreamServer(listenerFactories: [
+            { _ in quic },
+            { _ in throw ListenerCreationError() },
+        ])
+
+        await #expect(throws: ListenerCreationError.self) {
+            try await server.start(on: 9999)
+        }
+        #expect(quic.startedQueues.isEmpty)
+    }
+
+    @Test
+    func reportsReadyOnlyWhenEveryListenerIsReady() async throws {
+        let quic = MockTransportListener()
+        let tcp = MockTransportListener(serviceType: FrameStreamService.tcpType)
+        let server = FrameStreamServer(listenerFactories: [{ _ in quic }, { _ in tcp }])
+        try await server.start(on: 9999)
+
+        quic.simulateState(.ready)
+        #expect(server.state.listenerState.value == .setup)
+
+        tcp.simulateState(.ready)
+        #expect(server.state.listenerState.value == .ready)
+
+        tcp.simulateState(.failed(.posix(.EADDRINUSE)))
+        #expect(server.state.listenerState.value == .failed(.posix(.EADDRINUSE)))
+    }
+
+    @Test
+    func rejectsClientOnOtherListenerWhileOneIsStreaming() async throws {
+        let quic = MockTransportListener()
+        let tcp = MockTransportListener(serviceType: FrameStreamService.tcpType)
+        let server = FrameStreamServer(listenerFactories: [{ _ in quic }, { _ in tcp }])
+        await server.setHelloAuthorizer { _ in .accepted }
+        let recorder = FrameRecorder()
+        await server.setFrameHandler { data in
+            Task { await recorder.store(data) }
+        }
+        try await server.start(on: 9999)
+
+        var receiveResults = helloResults()
+        for _ in 0..<128 {
+            receiveResults.append(.success(Data([0x00, 0x00, 0x00, 0x01])))
+            receiveResults.append(.success(Data([0xAA])))
+        }
+        let streaming = MockTransportConnection(receiveResults: receiveResults)
+        tcp.simulateNewConnection(streaming)
+        await waitForCondition { streaming.startedQueues.count == 1 }
+        streaming.simulateState(.ready)
+        _ = await recorder.waitForFrame()
+
+        let second = MockTransportConnection(receiveResults: [])
+        quic.simulateNewConnection(second)
+        await waitForCondition { second.forceCancelCallCount == 1 }
+
+        #expect(second.forceCancelCallCount == 1)
+        #expect(second.startedQueues.isEmpty)
+        #expect(streaming.cancelCallCount == 0)
+    }
+
+    @Test
+    func replacesStaleClientFromOtherListener() async throws {
+        let quic = MockTransportListener()
+        let tcp = MockTransportListener(serviceType: FrameStreamService.tcpType)
+        let server = FrameStreamServer(listenerFactories: [{ _ in quic }, { _ in tcp }])
+        try await server.start(on: 9999)
+
+        let stale = MockTransportConnection(receiveResults: [])
+        quic.simulateNewConnection(stale)
+        await waitForCondition { stale.startedQueues.count == 1 }
+
+        let replacement = MockTransportConnection(receiveResults: [])
+        tcp.simulateNewConnection(replacement)
+        await waitForCondition { replacement.startedQueues.count == 1 }
+
+        #expect(stale.cancelCallCount == 1)
+        #expect(replacement.startedQueues.count == 1)
+    }
+
+    @Test
+    func stopCancelsEveryListener() async throws {
+        let quic = MockTransportListener()
+        let tcp = MockTransportListener(serviceType: FrameStreamService.tcpType)
+        let server = FrameStreamServer(listenerFactories: [{ _ in quic }, { _ in tcp }])
+        try await server.start(on: 9999)
+
+        await server.stop()
+
+        #expect(quic.cancelCallCount == 1)
+        #expect(tcp.cancelCallCount == 1)
+    }
 }
 
 private let validHello = PairingHello.hello(clientID: UUID(), secret: Data(repeating: 7, count: 32))
@@ -386,6 +500,7 @@ private actor StreamUnavailableRecorder {
 }
 
 private final class MockTransportListener: @unchecked Sendable, TransportListener {
+    let serviceType: String
     var state: TransportListenerState = .setup
     var stateUpdateHandler: (@Sendable (TransportListenerState) -> Void)?
     var newConnectionHandler: (@Sendable (any TransportConnection) -> Void)?
@@ -394,6 +509,15 @@ private final class MockTransportListener: @unchecked Sendable, TransportListene
 
     private(set) var startedQueues = [DispatchQueue]()
     private(set) var cancelCallCount = 0
+
+    init(serviceType: String = FrameStreamService.type) {
+        self.serviceType = serviceType
+    }
+
+    func simulateState(_ state: TransportListenerState) {
+        self.state = state
+        stateUpdateHandler?(state)
+    }
 
     func start(queue: DispatchQueue) {
         startedQueues.append(queue)

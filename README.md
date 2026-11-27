@@ -205,6 +205,8 @@ The stream transport is configured as:
 - a `PairingHello` handshake as the first packet; the Mac accepts frames only from paired iPhones
 - video frames sent as QUIC datagrams, so a late or lost frame is skipped instead of holding up the frames behind it; the Mac asks the iPhone for a keyframe to recover
 
+Android phones have no QUIC datagram API, so the Mac also listens for TLS 1.3 over TCP, advertised as Bonjour `_cam2mac._tcp` under the same name. It uses the same certificate, pinning, `PairingHello` handshake and HEVC frames; frames are length-prefixed on the TLS stream. The TCP port is picked by the system and found through Bonjour. One phone streams at a time, whichever transport it uses.
+
 The current defaults live in:
 
 - `FrontCameraContinuation/Shared/TLSConfiguration.swift`
