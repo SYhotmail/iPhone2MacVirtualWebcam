@@ -1,5 +1,5 @@
 {
-  "_doc": "Video frames split into QUIC datagrams. Each datagram starts with a 10-byte big-endian header: version (1) | flags (bit 0 = keyframe) | frameID u32 | chunkIndex u16 | chunkCount u16, then up to maximumDatagramSize - 10 payload bytes. Generated from Transport/Sources/Transport/VideoDatagram.swift.",
+  "_doc": "VideoDatagram: a frame is split into datagrams of at most maximumDatagramSize bytes, each with a 10-byte big-endian header: version (1) | flags (bit 0 keyframe) | frameID u32 | chunkIndex u16 | chunkCount u16. Empty frames and sizes with no room for payload produce no datagrams.",
   "cases": [
     {
       "name": "single chunk keyframe",
@@ -12,40 +12,40 @@
       ]
     },
     {
-      "name": "three chunks, last one short",
-      "frameHex": "000102030405060708090a0b0c0d",
+      "name": "three chunks delta",
+      "frameHex": "000102030405060708090a0b0c0d0e0f101112131415161718",
       "frameID": 7,
       "isKeyframe": false,
-      "maximumDatagramSize": 16,
+      "maximumDatagramSize": 20,
       "datagramsHex": [
-        "01000000000700000003000102030405",
-        "01000000000700010003060708090a0b",
-        "010000000007000200030c0d"
+        "0100000000070000000300010203040506070809",
+        "010000000007000100030a0b0c0d0e0f10111213",
+        "010000000007000200031415161718"
       ]
     },
     {
-      "name": "exact multiple of the payload size",
-      "frameHex": "a0a1a2a3a4a5a6a7a8a9aaab",
-      "frameID": 16909060,
+      "name": "exact multiple of capacity",
+      "frameHex": "abababababababababababababababababababab",
+      "frameID": 42,
       "isKeyframe": true,
-      "maximumDatagramSize": 16,
+      "maximumDatagramSize": 20,
       "datagramsHex": [
-        "01010102030400000002a0a1a2a3a4a5",
-        "01010102030400010002a6a7a8a9aaab"
+        "01010000002a00000002abababababababababab",
+        "01010000002a00010002abababababababababab"
       ]
     },
     {
-      "name": "highest frame ID before wrapping",
-      "frameHex": "deadbeef",
+      "name": "frame ID near wrap",
+      "frameHex": "010203",
       "frameID": 4294967295,
       "isKeyframe": false,
       "maximumDatagramSize": 1200,
       "datagramsHex": [
-        "0100ffffffff00000001deadbeef"
+        "0100ffffffff00000001010203"
       ]
     },
     {
-      "name": "empty frame sends nothing",
+      "name": "empty frame",
       "frameHex": "",
       "frameID": 1,
       "isKeyframe": true,
@@ -53,8 +53,8 @@
       "datagramsHex": []
     },
     {
-      "name": "datagram without room for payload sends nothing",
-      "frameHex": "010203",
+      "name": "datagram too small for payload",
+      "frameHex": "01",
       "frameID": 1,
       "isKeyframe": true,
       "maximumDatagramSize": 10,
