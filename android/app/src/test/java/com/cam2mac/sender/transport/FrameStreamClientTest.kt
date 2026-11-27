@@ -41,13 +41,16 @@ class FrameStreamClientTest {
         hello: () -> PairingHello = { PairingHello.hello(clientID, secret) },
         onAccepted: (PairingHello) -> Unit = {},
         onKeyframeRequest: () -> Unit = {},
+        candidates: () -> Sequence<InetSocketAddress> = { sequenceOf(serverAddress(server)) },
     ) = FrameStreamClient(
-        resolve = { InetSocketAddress(InetAddress.getLoopbackAddress(), server.localPort) },
+        candidates = candidates,
         trust = PinnedTrust(fingerprint),
         hello = hello,
         onAccepted = onAccepted,
         onKeyframeRequest = onKeyframeRequest,
     ).also { client = it }
+
+    private fun serverAddress(server: SSLServerSocket) = InetSocketAddress(InetAddress.getLoopbackAddress(), server.localPort)
 
     private fun Socket.readHello(): JsonObject {
         soTimeout = 5_000
@@ -136,14 +139,33 @@ class FrameStreamClientTest {
     }
 
     @Test
-    fun certificateMismatchFails() {
+    fun certificateMismatchKeepsRetrying() {
         val streamClient = makeClient(fingerprint = TestIdentity().fingerprint)
         streamClient.start()
         server.soTimeout = 5_000
         runCatching { server.accept().use { (it as javax.net.ssl.SSLSocket).startHandshake() } }
+        // Another Mac with the same name may answer while the paired one is offline: not a final failure.
         val status = runBlocking {
-            withTimeout(5_000) { streamClient.status.first { it is StreamStatus.Failed } }
+            withTimeout(5_000) { streamClient.status.first { it is StreamStatus.Retrying } }
         }
-        assertTrue(status.toString(), (status as StreamStatus.Failed).reason.contains("does not match"))
+        assertTrue(status.toString(), (status as StreamStatus.Retrying).reason.contains("not the paired one"))
+    }
+
+    @Test
+    fun skipsSameNamedReceiverWithAnotherCertificate() {
+        val impostor = TestIdentity().serverContext().serverSocketFactory
+            .createServerSocket(0, 1, InetAddress.getLoopbackAddress()) as SSLServerSocket
+        impostor.use {
+            val impostorThread = Thread {
+                runCatching { impostor.accept().use { (it as javax.net.ssl.SSLSocket).startHandshake() } }
+            }.apply { start() }
+            // The impostor holds the exact name; the paired Mac was renamed by Bonjour and comes second.
+            makeClient(candidates = { sequenceOf(serverAddress(impostor), serverAddress(server)) }).start()
+
+            server.accept().use { socket ->
+                assertEquals("hello", socket.readHello()["type"]?.jsonPrimitive?.content)
+            }
+            impostorThread.join(5_000)
+        }
     }
 }

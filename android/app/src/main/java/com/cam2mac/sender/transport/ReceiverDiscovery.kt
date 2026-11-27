@@ -17,27 +17,78 @@ import java.util.concurrent.TimeoutException
 
 /**
  * Finds the Mac's TLS/TCP listener through Bonjour (`_cam2mac._tcp`), by the service name from the QR code.
- * The Mac advertises its QUIC listener under the same name as `_cam2mac._udp`.
+ * The QR name comes from the Mac's `_cam2mac._udp` listener; Bonjour may have renamed the `_tcp` one after a
+ * name conflict, so when the exact name is not found the lookup falls back to similar names
+ * ([ServiceNameMatcher]). The caller's certificate pin picks the right Mac among them.
  */
 class ReceiverDiscovery(context: Context) {
     private val nsd = context.getSystemService(NsdManager::class.java)
     private val wifi = context.applicationContext.getSystemService(WifiManager::class.java)
     private val executor = Executors.newSingleThreadExecutor()
 
-    /** Blocks until [serviceName] resolves or [timeoutMillis] pass. */
-    fun resolve(serviceName: String, timeoutMillis: Long = 5_000): InetSocketAddress {
+    /**
+     * Addresses to try in order, computed lazily on the calling thread: the exact [serviceName] first, then every
+     * other `_cam2mac._tcp` service with a matching name. The caller stops at the first one that passes its
+     * certificate pin. Throws [IOException] when nothing is found.
+     */
+    fun candidates(serviceName: String): Sequence<InetSocketAddress> = sequence {
+        var failure: IOException? = null
+        try {
+            yield(resolveService(serviceName, EXACT_TIMEOUT_MILLIS))
+        } catch (error: IOException) {
+            failure = error
+        }
+        val similarNames = ServiceNameMatcher.ranked(serviceName, browse(BROWSE_MILLIS)).filter { it != serviceName }
+        for (name in similarNames) {
+            try {
+                yield(resolveService(name, EXACT_TIMEOUT_MILLIS))
+                failure = null
+            } catch (error: IOException) {
+                failure = failure ?: error
+            }
+        }
+        failure?.let { throw it }
+    }
+
+    private inline fun <T> withMulticastLock(block: () -> T): T {
         val multicastLock = wifi.createMulticastLock("cam2mac-discovery").apply {
             setReferenceCounted(false)
             acquire()
         }
         try {
-            return resolveService(serviceName, timeoutMillis)
+            return block()
         } finally {
             multicastLock.release()
         }
     }
 
-    private fun resolveService(serviceName: String, timeoutMillis: Long): InetSocketAddress {
+    /** Names of the `_cam2mac._tcp` services seen within [durationMillis]. */
+    private fun browse(durationMillis: Long): Set<String> = withMulticastLock {
+        val names = java.util.Collections.synchronizedSet(mutableSetOf<String>())
+        val listener = object : NsdManager.DiscoveryListener {
+            override fun onServiceFound(info: NsdServiceInfo) {
+                names += info.serviceName
+            }
+
+            override fun onServiceLost(info: NsdServiceInfo) = Unit
+            override fun onDiscoveryStarted(serviceType: String) = Unit
+            override fun onDiscoveryStopped(serviceType: String) = Unit
+            override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
+            override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) = Unit
+        }
+        nsd.discoverServices(SERVICE_TYPE, NsdManager.PROTOCOL_DNS_SD, listener)
+        try {
+            Thread.sleep(durationMillis)
+        } finally {
+            runCatching { nsd.stopServiceDiscovery(listener) }
+        }
+        names.toSet()
+    }
+
+    private fun resolveService(serviceName: String, timeoutMillis: Long): InetSocketAddress =
+        withMulticastLock { resolveUnlocked(serviceName, timeoutMillis) }
+
+    private fun resolveUnlocked(serviceName: String, timeoutMillis: Long): InetSocketAddress {
         val request = NsdServiceInfo().apply {
             this.serviceName = serviceName
             serviceType = SERVICE_TYPE
@@ -100,5 +151,7 @@ class ReceiverDiscovery(context: Context) {
 
     private companion object {
         const val SERVICE_TYPE = "_cam2mac._tcp"
+        const val EXACT_TIMEOUT_MILLIS = 3_000L
+        const val BROWSE_MILLIS = 2_000L
     }
 }

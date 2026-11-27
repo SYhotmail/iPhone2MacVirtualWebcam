@@ -90,7 +90,7 @@ class SenderViewModel(application: Application) : AndroidViewModel(application) 
             renderer.setEncoderSurface(encoder.inputSurface, encoder.width, encoder.height)
 
             val client = FrameStreamClient(
-                resolve = { discovery.resolve(mac.serviceName) },
+                candidates = { discovery.candidates(mac.serviceName) },
                 trust = PinnedTrust(mac.fingerprint),
                 hello = {
                     pendingToken.get()

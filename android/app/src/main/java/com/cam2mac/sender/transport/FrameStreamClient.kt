@@ -20,7 +20,7 @@ sealed interface StreamStatus {
     data object Streaming : StreamStatus
     /** Lost or could not reach the Mac; trying again. */
     data class Retrying(val reason: String) : StreamStatus
-    /** Retrying cannot help: the Mac rejected this phone or presented another certificate. */
+    /** Retrying cannot help: the Mac rejected this phone. */
     data class Failed(val reason: String) : StreamStatus
 }
 
@@ -32,8 +32,11 @@ sealed interface StreamStatus {
  * create a new client after [close].
  */
 class FrameStreamClient(
-    /** Blocking lookup of the Mac's address; throws [IOException] when it is not found. */
-    private val resolve: () -> InetSocketAddress,
+    /**
+     * Blocking, lazy lookup of addresses that may be the Mac, best first; the certificate pin picks the first
+     * real one. Throws [IOException] when nothing is found.
+     */
+    private val candidates: () -> Sequence<InetSocketAddress>,
     private val trust: PinnedTrust,
     /** The hello for the next connection attempt. */
     private val hello: () -> PairingHello,
@@ -102,8 +105,7 @@ class FrameStreamClient(
         while (running) {
             try {
                 _status.value = StreamStatus.Connecting
-                val address = resolve()
-                connect(address).use { tls ->
+                connectToPinnedReceiver().use { tls ->
                     authenticate(tls)
                     attempt = 0
                     stream(tls)
@@ -113,16 +115,20 @@ class FrameStreamClient(
                 return
             } catch (error: IOException) {
                 if (!running) break
-                if (error.hasCause<FingerprintMismatchException>()) {
-                    fail("The receiver's certificate does not match the paired Mac. Pair again.")
-                    return
+                // A mismatch may be another Mac with the same name while ours is offline, so keep trying.
+                val reason = if (error.hasCause<FingerprintMismatchException>()) {
+                    "Found a Mac with this name, but not the paired one. If you reset the Mac app, pair again."
+                } else {
+                    error.message ?: error.javaClass.simpleName
                 }
-                _status.value = StreamStatus.Retrying(error.message ?: error.javaClass.simpleName)
+                _status.value = StreamStatus.Retrying(reason)
                 try {
                     Thread.sleep(backoffMillis(attempt++))
                 } catch (_: InterruptedException) {
                     break
                 }
+            } catch (_: InterruptedException) {
+                break
             }
         }
         if (!running) _status.value = StreamStatus.Idle
@@ -133,19 +139,39 @@ class FrameStreamClient(
         running = false
     }
 
+    /** Connects to the first candidate whose TLS handshake passes the certificate pin. */
+    private fun connectToPinnedReceiver(): SSLSocket {
+        var failure: IOException? = null
+        for (address in candidates()) {
+            try {
+                return connect(address)
+            } catch (error: IOException) {
+                if (!running) throw error
+                // Prefer reporting a mismatch: it tells the user a same-named Mac was found.
+                if (failure == null || error.hasCause<FingerprintMismatchException>()) failure = error
+            }
+        }
+        throw failure ?: IOException("Could not find the Mac on this network")
+    }
+
     private fun connect(address: InetSocketAddress): SSLSocket {
         val tcp = Socket()
         socket = tcp
-        if (!running) throw IOException("Stopped")
-        tcp.tcpNoDelay = true
-        tcp.connect(address, connectTimeoutMillis)
-        val tls = trust.sslContext().socketFactory
-            .createSocket(tcp, address.hostString, address.port, true) as SSLSocket
-        socket = tls
-        tls.enabledProtocols = arrayOf("TLSv1.3")
-        tls.soTimeout = connectTimeoutMillis
-        tls.startHandshake()
-        return tls
+        try {
+            if (!running) throw IOException("Stopped")
+            tcp.tcpNoDelay = true
+            tcp.connect(address, connectTimeoutMillis)
+            val tls = trust.sslContext().socketFactory
+                .createSocket(tcp, address.hostString, address.port, true) as SSLSocket
+            socket = tls
+            tls.enabledProtocols = arrayOf("TLSv1.3")
+            tls.soTimeout = connectTimeoutMillis
+            tls.startHandshake()
+            return tls
+        } catch (error: IOException) {
+            tcp.close()
+            throw error
+        }
     }
 
     private fun authenticate(tls: SSLSocket) {
