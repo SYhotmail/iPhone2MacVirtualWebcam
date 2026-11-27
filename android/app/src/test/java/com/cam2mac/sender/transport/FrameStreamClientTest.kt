@@ -15,9 +15,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import tech.kwik.core.QuicStream
-import java.io.ByteArrayOutputStream
 import java.net.InetSocketAddress
-import java.nio.ByteBuffer
 import java.util.UUID
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.Semaphore
@@ -42,13 +40,33 @@ class FrameStreamClientTest {
         onAccepted: (PairingHello) -> Unit = {},
         onKeyframeRequest: () -> Unit = {},
         candidates: () -> Sequence<InetSocketAddress> = { sequenceOf(receiver.address) },
+        backlogLimitBytes: Long = SendBacklog.DEFAULT_LIMIT_BYTES,
     ) = FrameStreamClient(
         candidates = candidates,
         trust = PinnedTrust(fingerprint),
         hello = hello,
         onAccepted = onAccepted,
         onKeyframeRequest = onKeyframeRequest,
+        backlogLimitBytes = backlogLimitBytes,
     ).also { client = it }
+
+    /** Accepts the next connection, answers its hello with ok and waits until the client streams on it. */
+    private fun acceptStreaming(keyframeRequests: Semaphore): QuicTestReceiver.Peer {
+        val peer = receiver.accept()
+        val control = peer.control()
+        control.readHello()
+        control.reply("""{"ok":true}""")
+        // The client requests a keyframe as soon as it can send video on this connection.
+        assertTrue(keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
+        return peer
+    }
+
+    private fun InOrderReassembler.assertNext(frameID: Int, isKeyframe: Boolean, data: ByteArray) {
+        val frame = checkNotNull(next()) { "frame $frameID never completed" }
+        assertEquals(frameID, frame.frameID)
+        assertEquals(isKeyframe, frame.isKeyframe)
+        assertArrayEquals(data, frame.data)
+    }
 
     private fun QuicStream.readHello(): JsonObject {
         val payload = FramePacket.read(inputStream, 4096)
@@ -61,33 +79,6 @@ class FrameStreamClientTest {
     }
 
     private fun QuicStream.reply(json: String) = reply(json.toByteArray())
-
-    /** Datagrams of frames not asked for yet; Kwik may hand datagrams over out of order. */
-    private val pendingDatagrams = mutableListOf<ByteArray>()
-
-    private fun ByteArray.frameID() = ByteBuffer.wrap(this, 2, 4).int
-    private fun ByteArray.chunkIndex() = ByteBuffer.wrap(this, 6, 2).short.toInt() and 0xFFFF
-    private fun ByteArray.chunkCount() = ByteBuffer.wrap(this, 8, 2).short.toInt() and 0xFFFF
-
-    /** Collects the datagrams of frame [frameID], checks their headers and returns the frame. */
-    private fun LinkedBlockingQueue<ByteArray>.receiveFrame(frameID: Int, isKeyframe: Boolean): ByteArray {
-        fun chunks() = pendingDatagrams.filter { it.frameID() == frameID }
-        while (chunks().let { it.isEmpty() || it.size < it.first().chunkCount() }) {
-            pendingDatagrams += checkNotNull(poll(5, TimeUnit.SECONDS)) { "Frame $frameID is incomplete" }
-        }
-        val chunks = chunks().sortedBy { it.chunkIndex() }
-        pendingDatagrams -= chunks.toSet()
-        val frame = ByteArrayOutputStream()
-        chunks.forEachIndexed { index, datagram ->
-            assertTrue("datagram of ${datagram.size} bytes", datagram.size <= VideoDatagram.MAXIMUM_DATAGRAM_SIZE)
-            assertEquals(VideoDatagram.VERSION, datagram[0])
-            assertEquals(if (isKeyframe) 1.toByte() else 0.toByte(), datagram[1])
-            assertEquals(index, datagram.chunkIndex())
-            assertEquals(chunks.size, datagram.chunkCount())
-            frame.write(datagram, VideoDatagram.HEADER_BYTE_COUNT, datagram.size - VideoDatagram.HEADER_BYTE_COUNT)
-        }
-        return frame.toByteArray()
-    }
 
     @Test
     fun streamsDatagramsAndHandlesKeyframeRequests() {
@@ -112,12 +103,60 @@ class FrameStreamClientTest {
         streamClient.send(keyframe, isKeyframe = true)
         val delta = byteArrayOf(0, 0, 0, 1, 0x02, 0x01, 0x55)
         streamClient.send(delta, isKeyframe = false)
-        assertArrayEquals(keyframe, peer.datagrams.receiveFrame(frameID = 0, isKeyframe = true))
-        assertArrayEquals(delta, peer.datagrams.receiveFrame(frameID = 1, isKeyframe = false))
-        assertTrue("the leading delta was sent", pendingDatagrams.isEmpty() && peer.datagrams.isEmpty())
+        // Had the leading delta gone out, it would be frame 0.
+        val frames = InOrderReassembler(peer.datagrams)
+        frames.assertNext(frameID = 0, isKeyframe = true, data = keyframe)
+        frames.assertNext(frameID = 1, isKeyframe = false, data = delta)
 
         control.reply(byteArrayOf(0x01))
         assertTrue("[0x01] did not trigger a keyframe request", keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
+    }
+
+    @Test
+    fun framesArriveInOrderWhenTheSendQueueBacksUp() {
+        val keyframeRequests = Semaphore(0)
+        // No backlog dropping: this checks the order Kwik puts datagrams on the wire.
+        val streamClient = makeClient(onKeyframeRequest = { keyframeRequests.release() }, backlogLimitBytes = 1L shl 40)
+        streamClient.start()
+        val peer = acceptStreaming(keyframeRequests)
+
+        // Two IDRs are far beyond the initial congestion window, so most datagrams wait in Kwik's queue. The small
+        // deltas after them (less than one chunk each) must not slip in front of a queued full-size chunk.
+        val sizes = listOf(150_000, 150_000) + List(20) { 200 + it * 97 }
+        sizes.forEachIndexed { index, size ->
+            streamClient.send(ByteArray(size) { (it % 251).toByte() }, isKeyframe = index < 2)
+        }
+
+        val frames = InOrderReassembler(peer.datagrams)
+        val completed = generateSequence { frames.next(timeoutMillis = 3_000) }.take(sizes.size).map { it.frameID }.toList()
+        assertEquals(sizes.indices.toList(), completed)
+    }
+
+    @Test
+    fun reconnectRestartsFrameIDsWithAKeyframe() {
+        val keyframeRequests = Semaphore(0)
+        val streamClient = makeClient(onKeyframeRequest = { keyframeRequests.release() })
+        streamClient.start()
+        val keyframe = ByteArray(3_000) { it.toByte() }
+        val delta = byteArrayOf(0, 0, 0, 1, 0x02, 0x01, 0x55)
+
+        val first = acceptStreaming(keyframeRequests)
+        streamClient.send(keyframe, isKeyframe = true)
+        streamClient.send(delta, isKeyframe = false)
+        InOrderReassembler(first.datagrams).run {
+            assertNext(frameID = 0, isKeyframe = true, data = keyframe)
+            assertNext(frameID = 1, isKeyframe = false, data = delta)
+        }
+        first.connection.close()
+
+        val second = acceptStreaming(keyframeRequests)
+        streamClient.send(delta, isKeyframe = false) // Dropped: the new connection starts with a keyframe.
+        streamClient.send(keyframe, isKeyframe = true)
+        streamClient.send(delta, isKeyframe = false)
+        InOrderReassembler(second.datagrams).run {
+            assertNext(frameID = 0, isKeyframe = true, data = keyframe)
+            assertNext(frameID = 1, isKeyframe = false, data = delta)
+        }
     }
 
     @Test

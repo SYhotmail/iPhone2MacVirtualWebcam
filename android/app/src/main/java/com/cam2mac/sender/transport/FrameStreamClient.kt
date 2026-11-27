@@ -8,12 +8,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.SerializationException
 import tech.kwik.core.QuicClientConnection
 import tech.kwik.core.QuicStream
+import tech.kwik.core.impl.QuicConnectionImpl
 import java.io.EOFException
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.time.Duration
-import java.util.Timer
-import kotlin.concurrent.schedule
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 sealed interface StreamStatus {
     data object Idle : StreamStatus
@@ -48,6 +50,8 @@ class FrameStreamClient(
     /** The Mac needs a keyframe (after a loss, or because streaming just started). Called from client threads. */
     private val onKeyframeRequest: () -> Unit,
     private val connectTimeoutMillis: Long = 5_000,
+    /** See [SendBacklog]; tests raise it to isolate other behavior. */
+    private val backlogLimitBytes: Long = SendBacklog.DEFAULT_LIMIT_BYTES,
 ) {
     private val _status = MutableStateFlow<StreamStatus>(StreamStatus.Idle)
     val status: StateFlow<StreamStatus> = _status.asStateFlow()
@@ -58,8 +62,6 @@ class FrameStreamClient(
     /** Set while authenticated; [send] writes datagrams to it. */
     @Volatile private var video: VideoSender? = null
     private var thread: Thread? = null
-    /** Closes connections whose reply is late: Kwik stream reads have no timeout. */
-    private val deadlines = Timer("FrameStreamClient-deadlines", true)
 
     fun start() {
         check(thread == null) { "FrameStreamClient is single use" }
@@ -73,13 +75,13 @@ class FrameStreamClient(
         video = null
         runCatching { connection?.close() }
         thread?.interrupt()
-        deadlines.cancel()
         _status.value = StreamStatus.Idle
     }
 
     /**
-     * Sends one access unit as datagrams. Frames are dropped while not connected, and after (re)connecting
-     * until the first keyframe: the Mac can't decode deltas without it.
+     * Sends one access unit as datagrams. Frames are dropped while not connected, after (re)connecting until the
+     * first keyframe (the Mac can't decode deltas without it), and while Kwik's send queue is backed up
+     * ([SendBacklog], which then requests a keyframe through `onKeyframeRequest`).
      */
     fun send(frame: ByteArray, isKeyframe: Boolean) {
         video?.send(frame, isKeyframe)
@@ -184,15 +186,14 @@ class FrameStreamClient(
         val control = quic.createStream(true)
         FramePacket.write(control.outputStream, hello.encode())
         control.outputStream.flush()
-        val replyDeadline = deadlines.schedule(connectTimeoutMillis) { quic.close() }
-        val reply = try {
-            PairingReply.decode(FramePacket.read(control.inputStream, MAXIMUM_CONTROL_PACKET_BYTES))
-        } catch (error: SerializationException) {
-            throw IOException("Unreadable reply from the Mac", error)
-        } catch (error: IOException) {
-            throw if (error is EOFException) IOException("The Mac closed the connection") else error
-        } finally {
-            replyDeadline.cancel()
+        val reply = withReplyDeadline(quic) {
+            try {
+                PairingReply.decode(FramePacket.read(control.inputStream, MAXIMUM_CONTROL_PACKET_BYTES))
+            } catch (error: SerializationException) {
+                throw IOException("Unreadable reply from the Mac", error)
+            } catch (error: IOException) {
+                throw if (error is EOFException) IOException("The Mac closed the connection") else error
+            }
         }
         if (!reply.ok) {
             val reason = reply.reason ?: "The Mac rejected the connection"
@@ -204,9 +205,31 @@ class FrameStreamClient(
         return control
     }
 
+    /**
+     * Runs [read] with a deadline that closes [quic] when it passes, since Kwik stream reads have no timeout.
+     * Whichever comes first wins: a reply that arrived in time is never followed by a late close.
+     */
+    private fun <T> withReplyDeadline(quic: QuicClientConnection, read: () -> T): T {
+        val decided = AtomicBoolean(false)
+        val timer = Executors.newSingleThreadScheduledExecutor { Thread(it, "FrameStreamClient-deadline").apply { isDaemon = true } }
+        try {
+            timer.schedule({ if (decided.compareAndSet(false, true)) quic.close() }, connectTimeoutMillis, TimeUnit.MILLISECONDS)
+            val result = try {
+                read()
+            } catch (error: IOException) {
+                if (decided.compareAndSet(false, true)) throw error
+                throw IOException("The Mac did not answer the hello", error)
+            }
+            if (!decided.compareAndSet(false, true)) throw IOException("The Mac did not answer the hello")
+            return result
+        } finally {
+            timer.shutdownNow()
+        }
+    }
+
     /** Reads control packets until the connection ends; video goes out through [send] meanwhile. */
     private fun stream(quic: QuicClientConnection, control: QuicStream) {
-        video = VideoSender(quic)
+        video = VideoSender(quic, SendBacklog(backlogLimitBytes, quic.stats.bytesSent()), onKeyframeRequest)
         _status.value = StreamStatus.Streaming
         // The Mac drops connections that send no frame for 2 s, and it needs parameter sets first.
         onKeyframeRequest()
@@ -222,20 +245,35 @@ class FrameStreamClient(
     }
 
     /** Video for one connection: frame IDs start at 0, and the first frame sent is a keyframe. */
-    private class VideoSender(private val quic: QuicClientConnection) {
+    private class VideoSender(
+        quic: QuicClientConnection,
+        private val backlog: SendBacklog,
+        private val onKeyframeRequest: () -> Unit,
+    ) {
+        /** Kwik's builder always returns `QuicClientConnectionImpl`; [OrderedDatagramSender] needs its send API. */
+        private val quic = quic as QuicConnectionImpl
+        private val datagrams = OrderedDatagramSender(this.quic)
         private var nextFrameID = 0
-        private var waitingForKeyframe = true
 
         @Synchronized
         fun send(frame: ByteArray, isKeyframe: Boolean) {
-            if (waitingForKeyframe && !isKeyframe) return
-            val maximumSize = minOf(quic.maxDatagramDataSize(), VideoDatagram.MAXIMUM_DATAGRAM_SIZE)
-            val datagrams = VideoDatagram.chunks(frame, nextFrameID, isKeyframe, maximumSize)
-            if (datagrams.isEmpty()) return
-            waitingForKeyframe = false
+            if (!quic.canSendDatagram()) return
+            // maxDatagramDataSize() doesn't subtract the 16-byte AEAD tag; a datagram that doesn't fit is
+            // silently never sent.
+            val maximumSize = minOf(quic.maxDatagramDataSize() - AEAD_TAG_BYTES, VideoDatagram.MAXIMUM_DATAGRAM_SIZE)
+            val chunks = VideoDatagram.chunks(frame, nextFrameID, isKeyframe, maximumSize)
+            if (chunks.isEmpty()) return
+            when (backlog.decide(chunks.sumOf { it.size }, isKeyframe, quic.stats.bytesSent())) {
+                SendBacklog.Decision.DROP -> return
+                SendBacklog.Decision.DROP_AND_REQUEST_KEYFRAME -> {
+                    onKeyframeRequest()
+                    return
+                }
+                SendBacklog.Decision.SEND -> Unit
+            }
             nextFrameID++ // Wraps like the Mac's UInt32 frame IDs.
             try {
-                datagrams.forEach(quic::sendDatagram)
+                chunks.forEach(datagrams::send)
             } catch (_: RuntimeException) {
                 // The connection is closing; the connection loop reports it.
             }
@@ -248,6 +286,7 @@ class FrameStreamClient(
         const val APPLICATION_PROTOCOL = "camera-lan-stream"
         const val KEYFRAME_REQUEST: Byte = 0x01
         const val MAXIMUM_CONTROL_PACKET_BYTES = 4096
+        const val AEAD_TAG_BYTES = 16
         /** Notices a Mac that vanished; video keeps the connection busy, so this never fires while streaming. */
         const val IDLE_TIMEOUT_MILLIS = 5_000L
         /** `FrameStreamServer` sends this while it has no hello authorizer yet. */
