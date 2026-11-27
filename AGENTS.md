@@ -9,7 +9,7 @@ This file gives coding agents a fast, practical orientation for this repository.
 Main pieces:
 
 - `FrontCameraContinuation/FrontCameraContinuation`: iPhone sender app
-- `android/`: Android sender app (Kotlin, Jetpack Compose), streams over TLS/TCP
+- `android/`: Android sender app (Kotlin, Jetpack Compose), streams over QUIC via Kwik
 - `FrontCameraContinuation/TCPServer`: macOS receiver app
 - `FrontCameraContinuation/VirtualCameraExtension`: CoreMediaIO virtual camera extension
 - `Transport`: shared networking/transport package
@@ -37,8 +37,8 @@ Important implications:
 - The client's multiplex group opens an implicit stream that never carries data, so the Mac takes the first stream that becomes ready as the control stream (`QUICTunnelAcceptor`).
 - A client multiplex group briefly reports `waiting` before `ready`; `QUICClientConnection` only reports waits longer than 2 s.
 - On iOS 18, `NWConnectionGroup(with: NWMultiplexGroup(to: .service(...)))` traps (EXC_BREAKPOINT). `QUICClientConnection` resolves the Bonjour name with a UDP `NWConnection` first and opens the group to the resolved address. Check transport changes on an iOS 18 simulator, not only macOS 26.
-- The TCP transport sends frames length-prefixed on the stream; keyframe requests go back on the same stream.
-- The Mac runs two listeners in one `FrameStreamServer`: QUIC (`_cam2mac._udp`, port 9999, iPhone) and TLS 1.3 over TCP (`_cam2mac._tcp`, system-picked port, Android). Both use the same identity and Bonjour name and share the one client slot. Each `TransportListener` reports its own `serviceType`.
+- The TCP transport (tests, fallback) still sends frames length-prefixed on the stream.
+- The Android sender uses the same QUIC protocol through Kwik (pure Java): the same ALPN, datagrams, `VideoDatagram` header and Bonjour `_cam2mac._udp`. Kwik has no custom trust manager, so Android checks the pinned fingerprint right after the handshake, before sending any secret. Android can't use AWDL.
 - `PairingHello.currentVersion` is 3 (2: frames moved to datagrams; 3: video codec switched from H.264 to HEVC); mismatched apps are rejected with a version error.
 
 ## TLS Notes
