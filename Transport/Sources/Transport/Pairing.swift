@@ -22,7 +22,7 @@ public struct PairingHello: Codable, Sendable, Equatable {
         case hello
     }
 
-    public static let currentVersion = 2
+    public static let currentVersion = 3
     static let maximumEncodedSize = 4096
 
     public var version: Int

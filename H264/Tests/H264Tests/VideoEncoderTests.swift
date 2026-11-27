@@ -1,5 +1,5 @@
 //
-//  H264EncoderTests.swift
+//  VideoEncoderTests.swift
 //  H264
 //
 //  Created by Siarhei Yakushevich on 04/06/2026.
@@ -12,25 +12,25 @@ import Foundation
 import Testing
 @_spi(Testing) import H264
 
-@Suite("H264 Encoder Tests")
-struct H264EncoderTests {
+@Suite("Video Encoder Tests")
+struct VideoEncoderTests {
     @Test
     func targetBitRateUsesExpectedRanges() {
-        #expect(H264Encoder.targetBitRate(size: CGSize(width: 320, height: 240)) == 1_000_000)
-        #expect(H264Encoder.targetBitRate(size: CGSize(width: 1280, height: 720)) == 4_000_000)
-        #expect(H264Encoder.targetBitRate(size: CGSize(width: 2560, height: 1440)) == 6_000_000)
+        #expect(VideoEncoder.targetBitRate(size: CGSize(width: 320, height: 240)) == 700_000)
+        #expect(VideoEncoder.targetBitRate(size: CGSize(width: 1280, height: 720)) == 2_800_000)
+        #expect(VideoEncoder.targetBitRate(size: CGSize(width: 2560, height: 1440)) == 4_200_000)
     }
 }
 
-@Suite("H264 Encoder Ordering Tests")
-struct H264EncoderOrderingTests {
+@Suite("Video Encoder Ordering Tests")
+struct VideoEncoderOrderingTests {
     /// Simulates a rotation: a burst of landscape frames followed by portrait frames.
     /// Output must keep submission order so the decoder never sees new-size frames
     /// before the new parameter sets, or old-size frames after them.
     @Test
     func sizeChangeKeepsFrameOrderThroughDecode() async throws {
         let packets = PacketCollector()
-        let encoder = H264Encoder(expectedFrameRate: 30, maxKeyInterval: 30) { packet, isKeyframe in packets.append(packet, isKeyframe: isKeyframe) }
+        let encoder = VideoEncoder(expectedFrameRate: 30, maxKeyInterval: 30) { packet, isKeyframe in packets.append(packet, isKeyframe: isKeyframe) }
         let landscape = try makePixelBuffer(width: 320, height: 240)
         let portrait = try makePixelBuffer(width: 240, height: 320)
 
@@ -44,7 +44,7 @@ struct H264EncoderOrderingTests {
         encoder.scheduleToInvalidate()
         await waitUntil { packets.count >= expectedCount }
 
-        let decoder = H264Decoder()
+        let decoder = VideoDecoder()
         let sizes = SizeCollector()
         let subscription = decoder.publisher.sink { buffer in
             guard let format = CMSampleBufferGetFormatDescription(buffer.value) else { return }
@@ -65,7 +65,7 @@ struct H264EncoderOrderingTests {
     @Test
     func forcedKeyframeIsFlaggedAndSentWithParameterSets() async throws {
         let packets = PacketCollector()
-        let encoder = H264Encoder(expectedFrameRate: 30, maxKeyInterval: 30) { packet, isKeyframe in packets.append(packet, isKeyframe: isKeyframe) }
+        let encoder = VideoEncoder(expectedFrameRate: 30, maxKeyInterval: 30) { packet, isKeyframe in packets.append(packet, isKeyframe: isKeyframe) }
         let buffer = try makePixelBuffer(width: 320, height: 240)
 
         for _ in 0..<3 { encoder.scheduleToEncode(imageBuffer: buffer) }
@@ -74,9 +74,9 @@ struct H264EncoderOrderingTests {
         await waitUntil { packets.count >= 5 }
 
         #expect(packets.keyframeFlags() == [true, false, false, true, false])
-        // Keyframes lead with an SPS NAL unit (type 7) so the receiver can resume from them.
-        let startsWithSPS = packets.snapshot().map { $0.count > 4 && $0.starts(with: [0, 0, 0, 1]) && $0[4] & 0x1F == 7 }
-        #expect(startsWithSPS == [true, false, false, true, false])
+        // Keyframes lead with a VPS NAL unit (type 32) so the receiver can resume from them.
+        let startsWithVPS = packets.snapshot().map { $0.count > 4 && $0.starts(with: [0, 0, 0, 1]) && ($0[4] >> 1) & 0x3F == 32 }
+        #expect(startsWithVPS == [true, false, false, true, false])
     }
 
     private func makePixelBuffer(width: Int, height: Int) throws -> CVPixelBuffer {

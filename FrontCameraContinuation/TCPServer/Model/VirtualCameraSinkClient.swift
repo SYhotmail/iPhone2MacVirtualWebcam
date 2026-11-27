@@ -42,7 +42,7 @@ actor VirtualCameraSinkClient {
         lastConnectAttempt = nil
     }
 
-    func enqueue(_ sampleBuffer: H264Decoder.SendableSampleBuffer) {
+    func enqueue(_ sampleBuffer: VideoDecoder.SendableSampleBuffer) {
         connectIfNeeded()
         guard let sinkQueue else { return }
 

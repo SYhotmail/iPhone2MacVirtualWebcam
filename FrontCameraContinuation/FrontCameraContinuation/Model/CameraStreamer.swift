@@ -18,7 +18,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
 
     private let captureSessionManager = CaptureSessionManager()
     private let streamClient: FrameStreamClient
-    private var encoder: H264Encoder!
+    private var encoder: VideoEncoder!
     private let reconnectQueue = DispatchQueue(label: "camera.streamer.reconnect", qos: .utility)
     private var reconnectWorkItem: DispatchWorkItem? {
         didSet {
@@ -37,7 +37,7 @@ final class CameraStreamer: NSObject, @unchecked Sendable, AVCaptureVideoDataOut
         let data: Data
         let isKeyframe: Bool
     }
-    /// Encoded packets in encoder order; one consumer sends them so H.264 order is kept on the wire.
+    /// Encoded packets in encoder order; one consumer sends them so frame order is kept on the wire.
     private let outgoingPackets: AsyncStream<EncodedPacket>.Continuation
     
     var session: AVCaptureSession {

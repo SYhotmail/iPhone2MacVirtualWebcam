@@ -29,7 +29,7 @@ final class ServerManager: @unchecked Sendable {
     private var decodedFrameInputCancellable: AnyCancellable?
     private var _sharedFrameProvider: AnyPublisher<CMSampleBuffer, Never>!
     private let processedFramePublisher = PassthroughSubject<CMSampleBuffer, Never>()
-    let decoder = H264Decoder()
+    let decoder = VideoDecoder()
     let queue = DispatchQueue(label: "videoeffect.queue")
     private let frameProcessingStateQueue = DispatchQueue(label: "server.frame-processing.state")
     private var frameProcessingState = FrameProcessingState()
@@ -139,7 +139,7 @@ final class ServerManager: @unchecked Sendable {
             }
             
             let stream = sharedFrameProvider
-                .map { H264Decoder.SendableSampleBuffer(value: $0) }
+                .map { VideoDecoder.SendableSampleBuffer(value: $0) }
                 .values
             
             for await bufferWrapper in stream {

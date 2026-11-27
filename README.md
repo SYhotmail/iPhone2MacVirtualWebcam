@@ -26,7 +26,7 @@ The virtual camera uses two CoreMediaIO streams:
 
 In other words:
 
-1. iPhone captures and sends H.264 over a certificate-secured QUIC session on the LAN
+1. iPhone captures and sends HEVC (H.265) over a certificate-secured QUIC session on the LAN
 2. `Cam2Camera` receives and decodes the frames
 3. `Cam2Camera` writes those frames into the virtual camera sink stream
 4. `VirtualCameraExtension` forwards them to the source stream

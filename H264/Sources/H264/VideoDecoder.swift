@@ -4,7 +4,7 @@ import Synchronization
 @preconcurrency import Combine
 import VideoToolbox
 
-public actor H264Decoder {
+public actor VideoDecoder {
     public struct SendableSampleBuffer: @unchecked Sendable {
         public let value: CMSampleBuffer
 
@@ -13,14 +13,22 @@ public actor H264Decoder {
         }
     }
 
-    private static let annexBStartCodeLength = H264Encoder.annexBStartCode.count
+    private static let annexBStartCodeLength = VideoEncoder.annexBStartCode.count
     private static let avccNALUnitLengthFieldSize = 4
 
     private var formatDescription: CMFormatDescription?
     private var session: VTDecompressionSession?
 
+    private var vps: Data?
     private var sps: Data?
     private var pps: Data?
+
+    private enum NALUnitType {
+        static let vps: UInt8 = 32
+        static let sps: UInt8 = 33
+        static let pps: UInt8 = 34
+        static let accessUnitDelimiter: UInt8 = 35
+    }
 
     nonisolated private let decodedFramePublisher = PassthroughSubject<SendableSampleBuffer, Never>()
     nonisolated let streamDiagnostics: StreamDiagnostics
@@ -35,7 +43,7 @@ public actor H264Decoder {
     }
 
     /// Serial FIFO of work. Spawning a separate `Task` per frame does not guarantee
-    /// the actor runs them in arrival order, and H.264 frames decoded out of order
+    /// the actor runs them in arrival order, and HEVC frames decoded out of order
     /// show up as dropped/jumping frames during motion.
     nonisolated private let commands: AsyncStream<Command>.Continuation
 
@@ -98,25 +106,33 @@ public actor H264Decoder {
             guard nalUnit.count > Self.annexBStartCodeLength else {
                 continue
             }
-            let nalType = nalUnit[Self.annexBStartCodeLength] & 0x1F
+            let nalType = (nalUnit[Self.annexBStartCodeLength] >> 1) & 0x3F
+            let payload = nalUnit.advanced(by: Self.annexBStartCodeLength)
 
+            // A changed parameter set (e.g. a new size after rotation) needs a new session.
             switch nalType {
-            case 7:
-                let newSPS = nalUnit.advanced(by: Self.annexBStartCodeLength)
-                if sps != newSPS {
+            case NALUnitType.vps:
+                if vps != payload {
                     resetDecoder()
-                    sps = newSPS
+                    vps = payload
+                    sps = nil
                     pps = nil
                 }
                 createSessionFormatDescriptionOnNeed()
-            case 8:
-                let newPPS = nalUnit.advanced(by: Self.annexBStartCodeLength)
-                if pps != newPPS {
+            case NALUnitType.sps:
+                if sps != payload {
                     resetDecoder()
-                    pps = newPPS
+                    sps = payload
+                    pps = nil
                 }
                 createSessionFormatDescriptionOnNeed()
-            case 9:
+            case NALUnitType.pps:
+                if pps != payload {
+                    resetDecoder()
+                    pps = payload
+                }
+                createSessionFormatDescriptionOnNeed()
+            case NALUnitType.accessUnitDelimiter:
                 continue
             default:
                 frameNALUnits.append(nalUnit)
@@ -144,6 +160,7 @@ public actor H264Decoder {
 
     private func resetForStreamCore() {
         resetDecoder()
+        vps = nil
         sps = nil
         pps = nil
     }
@@ -152,33 +169,33 @@ public actor H264Decoder {
         guard session == nil else {
             return
         }
-        guard let sps, let pps else {
+        guard let vps, let sps, let pps else {
             return
         }
 
-        let formatDescription: CMFormatDescription? = sps.withUnsafeBytes { (spsPtr: UnsafeRawBufferPointer) -> CMFormatDescription? in
-            pps.withUnsafeBytes { (ppsPtr: UnsafeRawBufferPointer) -> CMFormatDescription? in
-                let ptrs = [spsPtr, ppsPtr]
-                let parameterSetPointers = ptrs.map { $0.bindMemory(to: UInt8.self).baseAddress }.compactMap { $0 }
+        let formatDescription: CMFormatDescription? = vps.withUnsafeBytes { vpsPtr in
+            sps.withUnsafeBytes { spsPtr in
+                pps.withUnsafeBytes { ppsPtr -> CMFormatDescription? in
+                    let ptrs = [vpsPtr, spsPtr, ppsPtr]
+                    let parameterSetPointers = ptrs.compactMap { $0.bindMemory(to: UInt8.self).baseAddress }
 
-                guard parameterSetPointers.count == ptrs.count else {
-                    return nil
+                    guard parameterSetPointers.count == ptrs.count else {
+                        return nil
+                    }
+
+                    var formatDescription: CMFormatDescription?
+                    let status = CMVideoFormatDescriptionCreateFromHEVCParameterSets(
+                        allocator: kCFAllocatorDefault,
+                        parameterSetCount: ptrs.count,
+                        parameterSetPointers: parameterSetPointers,
+                        parameterSetSizes: ptrs.map(\.count),
+                        nalUnitHeaderLength: Int32(Self.avccNALUnitLengthFieldSize),
+                        extensions: nil,
+                        formatDescriptionOut: &formatDescription
+                    )
+
+                    return Self.valueOnStatusSuccess(formatDescription, status: status)
                 }
-
-                let parameterSetSizes = ptrs.map(\.count)
-                assert(parameterSetSizes.count == 2)
-
-                var formatDescription: CMFormatDescription?
-                let status = CMVideoFormatDescriptionCreateFromH264ParameterSets(
-                    allocator: kCFAllocatorDefault,
-                    parameterSetCount: 2,
-                    parameterSetPointers: parameterSetPointers,
-                    parameterSetSizes: parameterSetSizes,
-                    nalUnitHeaderLength: Int32(Self.avccNALUnitLengthFieldSize),
-                    formatDescriptionOut: &formatDescription
-                )
-
-                return Self.valueOnStatusSuccess(formatDescription, status: status)
             }
         }
 
@@ -303,7 +320,7 @@ public actor H264Decoder {
             return
         }
 
-        let decoder = Unmanaged<H264Decoder>.fromOpaque(refCon).takeUnretainedValue()
+        let decoder = Unmanaged<VideoDecoder>.fromOpaque(refCon).takeUnretainedValue()
         guard let sampleBuffer = makeSampleBuffer(from: imageBuffer) else {
             return
         }
@@ -391,7 +408,7 @@ public actor H264Decoder {
         var startOffsets = [Int]()
         var index = 0
         while index <= bytes.count - annexBStartCodeLength {
-            if bytes[index..<index + annexBStartCodeLength] == H264Encoder.annexBStartCode[0..<annexBStartCodeLength] {
+            if bytes[index..<index + annexBStartCodeLength] == VideoEncoder.annexBStartCode[0..<annexBStartCodeLength] {
                 startOffsets.append(index)
                 index += annexBStartCodeLength
             } else {

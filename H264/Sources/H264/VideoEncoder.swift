@@ -2,9 +2,9 @@ import AVFoundation
 import QuartzCore
 import VideoToolbox
 
-public actor H264Encoder {
+public actor VideoEncoder {
     /// Receives each encoded access unit in decode order, and whether it is a keyframe
-    /// (a sync frame carrying SPS/PPS, decodable on its own).
+    /// (a sync frame carrying VPS/SPS/PPS, decodable on its own).
     public typealias OutputHandler = @Sendable (_ packet: Data, _ isKeyframe: Bool) -> Void
 
     /// `CVImageBuffer` is a CF type and not modeled as `Sendable`, but we hand off
@@ -108,7 +108,7 @@ public actor H264Encoder {
             frameProperties: frameProperties.flatMap { $0 as CFDictionary },
             infoFlagsOut: nil
         ) { status, _, sampleBuffer in
-            guard let sampleBuffer = H264Decoder.valueOnStatusSuccess(sampleBuffer, status: status),
+            guard let sampleBuffer = VideoDecoder.valueOnStatusSuccess(sampleBuffer, status: status),
                   CMSampleBufferDataIsReady(sampleBuffer),
                   let blockBuffer = CMSampleBufferGetDataBuffer(sampleBuffer) else {
                 return
@@ -179,7 +179,7 @@ public actor H264Encoder {
             allocator: nil,
             width: Int32(size.width),
             height: Int32(size.height),
-            codecType: kCMVideoCodecType_H264,
+            codecType: kCMVideoCodecType_HEVC,
             encoderSpecification: nil,
             imageBufferAttributes: nil,
             compressedDataAllocator: nil,
@@ -188,7 +188,7 @@ public actor H264Encoder {
             compressionSessionOut: &compressionSession
         )
 
-        guard let compressionSession = H264Decoder.valueOnStatusSuccess(compressionSession, status: res) else {
+        guard let compressionSession = VideoDecoder.valueOnStatusSuccess(compressionSession, status: res) else {
             return nil
         }
 
@@ -215,7 +215,7 @@ public actor H264Encoder {
         VTSessionSetProperty(
             compressionSession,
             key: kVTCompressionPropertyKey_ProfileLevel,
-            value: kVTProfileLevel_H264_Baseline_AutoLevel
+            value: kVTProfileLevel_HEVC_Main_AutoLevel
         )
 
         let averageBitRate = Self.targetBitRate(size: size)
@@ -236,22 +236,18 @@ public actor H264Encoder {
         return compressionSession
     }
 
+    /// HEVC needs roughly 30% less bitrate than H.264 for the same quality.
     @_spi(Testing) public static func targetBitRate(size: CGSize) -> Int {
-        let million = 1_000_000
-        return bitRateScale(size: size) * million
-    }
-    
-    private static func bitRateScale(size: CGSize) -> Int {
         let pixels = Int(size.width * size.height)
         switch pixels {
         case 0..<(640 * 480):
-            return 1
+            return 700_000
         case 0..<(1280 * 720):
-            return 2
+            return 1_400_000
         case 0..<(1920 * 1080):
-            return 4
+            return 2_800_000
         default:
-            return 6
+            return 4_200_000
         }
     }
 
@@ -281,40 +277,27 @@ public actor H264Encoder {
         return !packet.isEmpty ? packet : nil
     }
 
+    /// Appends every HEVC parameter set (VPS, SPS, PPS, in that order) as Annex-B units.
     private static func appendParameterSets(formatDesc: CMFormatDescription, to packet: inout Data) -> Bool {
-        var spsPointer: UnsafePointer<UInt8>?
-        var spsSize = 0
-        var spsCount = 0
-
-        var res = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-            formatDesc,
-            parameterSetIndex: 0,
-            parameterSetPointerOut: &spsPointer,
-            parameterSetSizeOut: &spsSize,
-            parameterSetCountOut: &spsCount,
-            nalUnitHeaderLengthOut: nil
-        )
-        guard let spsPointer = H264Decoder.valueOnStatusSuccess(spsPointer, status: res) else {
-            return false
-        }
-        appendAnnexBPacket(bytes: spsPointer, count: spsSize, to: &packet)
-
-        var ppsPointer: UnsafePointer<UInt8>?
-        var ppsSize = 0
-        var ppsCount = 0
-
-        res = CMVideoFormatDescriptionGetH264ParameterSetAtIndex(
-            formatDesc,
-            parameterSetIndex: 1,
-            parameterSetPointerOut: &ppsPointer,
-            parameterSetSizeOut: &ppsSize,
-            parameterSetCountOut: &ppsCount,
-            nalUnitHeaderLengthOut: nil
-        )
-        guard let ppsPointer = H264Decoder.valueOnStatusSuccess(ppsPointer, status: res) else {
-            return false
-        }
-        appendAnnexBPacket(bytes: ppsPointer, count: ppsSize, to: &packet)
+        var parameterSetCount = 0
+        var index = 0
+        repeat {
+            var pointer: UnsafePointer<UInt8>?
+            var size = 0
+            let res = CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(
+                formatDesc,
+                parameterSetIndex: index,
+                parameterSetPointerOut: &pointer,
+                parameterSetSizeOut: &size,
+                parameterSetCountOut: &parameterSetCount,
+                nalUnitHeaderLengthOut: nil
+            )
+            guard let pointer = VideoDecoder.valueOnStatusSuccess(pointer, status: res) else {
+                return false
+            }
+            appendAnnexBPacket(bytes: pointer, count: size, to: &packet)
+            index += 1
+        } while index < parameterSetCount
         return true
     }
 
@@ -335,7 +318,7 @@ public actor H264Encoder {
             dataPointerOut: &dataPointer
         )
 
-        guard let dataPointer = H264Decoder.valueOnStatusSuccess(dataPointer, status: res) else {
+        guard let dataPointer = VideoDecoder.valueOnStatusSuccess(dataPointer, status: res) else {
             return false
         }
 

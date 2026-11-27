@@ -12,7 +12,7 @@ Main pieces:
 - `FrontCameraContinuation/TCPServer`: macOS receiver app
 - `FrontCameraContinuation/VirtualCameraExtension`: CoreMediaIO virtual camera extension
 - `Transport`: shared networking/transport package
-- `H264`: shared codec helpers
+- `H264`: shared HEVC codec helpers (`VideoEncoder`, `VideoDecoder`; the package keeps its old name)
 
 ## Current Transport Design
 
@@ -37,7 +37,7 @@ Important implications:
 - A client multiplex group briefly reports `waiting` before `ready`; `QUICClientConnection` only reports waits longer than 2 s.
 - On iOS 18, `NWConnectionGroup(with: NWMultiplexGroup(to: .service(...)))` traps (EXC_BREAKPOINT). `QUICClientConnection` resolves the Bonjour name with a UDP `NWConnection` first and opens the group to the resolved address. Check transport changes on an iOS 18 simulator, not only macOS 26.
 - The TCP transport (tests, fallback) still sends frames length-prefixed on the stream.
-- `PairingHello.currentVersion` is 2 since frames moved to datagrams; mismatched apps are rejected with a version error.
+- `PairingHello.currentVersion` is 3 (2: frames moved to datagrams; 3: video codec switched from H.264 to HEVC); mismatched apps are rejected with a version error.
 
 ## TLS Notes
 
