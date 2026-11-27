@@ -76,8 +76,11 @@ fun PairScreen(onInvitation: (PairingInvitation) -> Unit) {
         })
         val preview = Preview.Builder().build().also { it.surfaceProvider = previewView.surfaceProvider }
 
+        var disposed = false
         val providerFuture = ProcessCameraProvider.getInstance(context)
         providerFuture.addListener({
+            // The screen may be gone before the provider is ready (both run on the main thread).
+            if (disposed) return@addListener
             val provider = providerFuture.get()
             val selector = if (provider.hasCamera(CameraSelector.DEFAULT_BACK_CAMERA)) {
                 CameraSelector.DEFAULT_BACK_CAMERA
@@ -89,6 +92,7 @@ fun PairScreen(onInvitation: (PairingInvitation) -> Unit) {
         }, ContextCompat.getMainExecutor(context))
 
         onDispose {
+            disposed = true
             if (providerFuture.isDone) providerFuture.get().unbind(preview, analysis)
             scanner.close()
             analysisExecutor.shutdown()

@@ -139,6 +139,19 @@ class FrameStreamClientTest {
     }
 
     @Test
+    fun notAcceptingConnectionsIsRetried() {
+        makeClient().start()
+        server.accept().use { socket ->
+            socket.readHello()
+            socket.reply("""{"ok":false,"reason":"Receiver is not accepting connections"}""")
+        }
+        // Not a final failure: the client comes back with another hello.
+        server.accept().use { socket ->
+            assertEquals("hello", socket.readHello()["type"]?.jsonPrimitive?.content)
+        }
+    }
+
+    @Test
     fun certificateMismatchKeepsRetrying() {
         val streamClient = makeClient(fingerprint = TestIdentity().fingerprint)
         streamClient.start()

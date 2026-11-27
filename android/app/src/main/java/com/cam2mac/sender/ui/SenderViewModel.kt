@@ -16,6 +16,7 @@ import com.cam2mac.sender.transport.StreamStatus
 import com.cam2mac.sender.video.GlFrameRenderer
 import com.cam2mac.sender.video.HevcEncoder
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -49,6 +50,7 @@ class SenderViewModel(application: Application) : AndroidViewModel(application) 
 
     @Volatile private var client: FrameStreamClient? = null
     private var encoder: HevcEncoder? = null
+    private var startJob: Job? = null
     private var statusJob: Job? = null
 
     fun pair(invitation: PairingInvitation) {
@@ -68,10 +70,12 @@ class SenderViewModel(application: Application) : AndroidViewModel(application) 
     fun start() {
         if (_isStreaming.value) return
         _isStreaming.value = true
-        viewModelScope.launch {
+        // stop() cancels this job, so a Stop during these suspensions never leaves a second pipeline behind.
+        startJob = viewModelScope.launch {
             val identity = store.identity()
             val mac = store.pairedMac.first()
-            if (mac == null || !_isStreaming.value) {
+            ensureActive()
+            if (mac == null) {
                 _isStreaming.value = false
                 return@launch
             }
@@ -117,6 +121,8 @@ class SenderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stop() {
         _isStreaming.value = false
+        startJob?.cancel()
+        startJob = null
         statusJob?.cancel()
         statusJob = null
         client?.close()

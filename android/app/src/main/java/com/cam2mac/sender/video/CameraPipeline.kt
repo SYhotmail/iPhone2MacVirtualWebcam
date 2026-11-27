@@ -16,10 +16,13 @@ import androidx.lifecycle.LifecycleOwner
 class CameraPipeline(private val context: Context, private val renderer: GlFrameRenderer) {
     private var provider: ProcessCameraProvider? = null
     private var preview: Preview? = null
+    /** Set by [unbind]; the provider future may complete after that, and must not bind then. */
+    private var unbound = false
 
     fun bind(lifecycleOwner: LifecycleOwner, onError: (Exception) -> Unit) {
         val future = ProcessCameraProvider.getInstance(context)
         future.addListener({
+            if (unbound) return@addListener
             try {
                 val provider = future.get().also { provider = it }
                 val preview = Preview.Builder()
@@ -53,6 +56,7 @@ class CameraPipeline(private val context: Context, private val renderer: GlFrame
     }
 
     fun unbind() {
+        unbound = true
         preview?.let { provider?.unbind(it) }
         preview = null
     }

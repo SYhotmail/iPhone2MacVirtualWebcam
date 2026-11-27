@@ -50,14 +50,11 @@ class FrameStreamClient(
     private val _status = MutableStateFlow<StreamStatus>(StreamStatus.Idle)
     val status: StateFlow<StreamStatus> = _status.asStateFlow()
 
-    @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN") // wait/notify monitor
-    private val lock = Object()
-    private val queue = ArrayDeque<ByteArray>()
-    private var acceptingFrames = false
-    private var waitingForKeyframe = true
+    private val queue = FrameQueue(queueCapacity)
 
     @Volatile private var running = false
-    @Volatile private var socket: Socket? = null
+    /** The current connection's TCP socket. Other threads close this one, never the TLS socket: no TLS I/O. */
+    @Volatile private var tcpSocket: Socket? = null
     private var thread: Thread? = null
 
     fun start() {
@@ -66,11 +63,12 @@ class FrameStreamClient(
         thread = Thread(::runConnectionLoop, "FrameStreamClient").apply { start() }
     }
 
+    /** Safe on the main thread: closes the TCP socket without TLS I/O, so it neither blocks nor touches the network. */
     fun close() {
         running = false
-        socket?.close()
+        runCatching { tcpSocket?.close() }
         thread?.interrupt()
-        synchronized(lock) { lock.notifyAll() }
+        queue.wake()
         _status.value = StreamStatus.Idle
     }
 
@@ -79,25 +77,7 @@ class FrameStreamClient(
      * dropped until the next keyframe (they would reference a dropped frame), and a keyframe is requested.
      */
     fun send(frame: ByteArray, isKeyframe: Boolean) {
-        var needsKeyframe = false
-        synchronized(lock) {
-            if (!acceptingFrames) return
-            if (isKeyframe) {
-                waitingForKeyframe = false
-                // Everything queued before a keyframe is obsolete once the queue backs up.
-                if (queue.size >= queueCapacity) queue.clear()
-            } else if (waitingForKeyframe) {
-                return
-            } else if (queue.size >= queueCapacity) {
-                waitingForKeyframe = true
-                needsKeyframe = true
-            }
-            if (!needsKeyframe) {
-                queue.addLast(frame)
-                lock.notifyAll()
-            }
-        }
-        if (needsKeyframe) onKeyframeRequest()
+        if (queue.offer(frame, isKeyframe)) onKeyframeRequest()
     }
 
     private fun runConnectionLoop() {
@@ -113,8 +93,8 @@ class FrameStreamClient(
             } catch (error: RejectedException) {
                 fail(error.message ?: "The Mac rejected the connection")
                 return
-            } catch (error: IOException) {
-                if (!running) break
+            } catch (error: Exception) {
+                if (error is InterruptedException || !running) break
                 // A mismatch may be another Mac with the same name while ours is offline, so keep trying.
                 val reason = if (error.hasCause<FingerprintMismatchException>()) {
                     "Found a Mac with this name, but not the paired one. If you reset the Mac app, pair again."
@@ -127,8 +107,6 @@ class FrameStreamClient(
                 } catch (_: InterruptedException) {
                     break
                 }
-            } catch (_: InterruptedException) {
-                break
             }
         }
         if (!running) _status.value = StreamStatus.Idle
@@ -142,13 +120,24 @@ class FrameStreamClient(
     /** Connects to the first candidate whose TLS handshake passes the certificate pin. */
     private fun connectToPinnedReceiver(): SSLSocket {
         var failure: IOException? = null
-        for (address in candidates()) {
+        // Prefer reporting a mismatch: it tells the user a same-named Mac was found.
+        fun record(error: IOException) {
+            if (failure?.hasCause<FingerprintMismatchException>() != true) failure = error
+        }
+        val addresses = candidates().iterator()
+        while (true) {
+            val address = try {
+                if (!addresses.hasNext()) break
+                addresses.next()
+            } catch (error: IOException) {
+                record(error)
+                break
+            }
             try {
                 return connect(address)
             } catch (error: IOException) {
                 if (!running) throw error
-                // Prefer reporting a mismatch: it tells the user a same-named Mac was found.
-                if (failure == null || error.hasCause<FingerprintMismatchException>()) failure = error
+                record(error)
             }
         }
         throw failure ?: IOException("Could not find the Mac on this network")
@@ -156,14 +145,13 @@ class FrameStreamClient(
 
     private fun connect(address: InetSocketAddress): SSLSocket {
         val tcp = Socket()
-        socket = tcp
+        tcpSocket = tcp
         try {
             if (!running) throw IOException("Stopped")
             tcp.tcpNoDelay = true
             tcp.connect(address, connectTimeoutMillis)
             val tls = trust.sslContext().socketFactory
                 .createSocket(tcp, address.hostString, address.port, true) as SSLSocket
-            socket = tls
             tls.enabledProtocols = arrayOf("TLSv1.3")
             tls.soTimeout = connectTimeoutMillis
             tls.startHandshake()
@@ -184,17 +172,18 @@ class FrameStreamClient(
         } catch (error: SerializationException) {
             throw IOException("Unreadable reply from the Mac", error)
         }
-        if (!reply.ok) throw RejectedException(reply.reason ?: "The Mac rejected the connection")
+        if (!reply.ok) {
+            val reason = reply.reason ?: "The Mac rejected the connection"
+            // The Mac app is starting up or between sessions: worth retrying.
+            if (reason == NOT_ACCEPTING_REASON) throw IOException(reason)
+            throw RejectedException(reason)
+        }
         onAccepted(hello)
         tls.soTimeout = 0
     }
 
     private fun stream(tls: SSLSocket) {
-        synchronized(lock) {
-            queue.clear()
-            waitingForKeyframe = true
-            acceptingFrames = true
-        }
+        queue.open()
         _status.value = StreamStatus.Streaming
         // The Mac drops connections that send no frame for 2 s, and it needs parameter sets first.
         onKeyframeRequest()
@@ -208,8 +197,9 @@ class FrameStreamClient(
                 }
             } catch (error: IOException) {
                 readerFailure.set(if (error is EOFException) IOException("The Mac closed the connection") else error)
-                tls.close()
-                synchronized(lock) { lock.notifyAll() }
+                // Unblocks a writer stuck on a full send buffer.
+                runCatching { tcpSocket?.close() }
+                queue.wake()
             }
         }, "FrameStreamClient-reader")
         reader.start()
@@ -217,10 +207,8 @@ class FrameStreamClient(
         val output = BufferedOutputStream(tls.outputStream, 64 * 1024)
         try {
             while (running) {
-                val frame = synchronized(lock) {
-                    if (queue.isEmpty() && readerFailure.get() == null && running) lock.wait(100)
-                    queue.removeFirstOrNull()
-                }
+                readerFailure.get()?.let { throw it }
+                val frame = queue.poll(100)
                 readerFailure.get()?.let { throw it }
                 if (frame == null) continue
                 FramePacket.write(output, frame)
@@ -229,10 +217,7 @@ class FrameStreamClient(
         } catch (_: InterruptedException) {
             // close() interrupts the thread; the loop condition ends streaming.
         } finally {
-            synchronized(lock) {
-                acceptingFrames = false
-                queue.clear()
-            }
+            queue.close()
             tls.close()
         }
     }
@@ -242,6 +227,8 @@ class FrameStreamClient(
     private companion object {
         const val KEYFRAME_REQUEST: Byte = 0x01
         const val MAXIMUM_CONTROL_PACKET_BYTES = 4096
+        /** `FrameStreamServer` sends this while it has no hello authorizer yet. */
+        const val NOT_ACCEPTING_REASON = "Receiver is not accepting connections"
 
         fun backoffMillis(attempt: Int): Long = (500L shl attempt.coerceAtMost(4)).coerceAtMost(5_000L)
 

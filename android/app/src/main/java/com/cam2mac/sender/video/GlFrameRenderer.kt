@@ -50,6 +50,7 @@ class GlFrameRenderer {
     private var cameraWidth = 0
     private var cameraHeight = 0
     private var rotationDegrees = 0
+    private var released = false
     private var encoder: Target? = null
     private var preview: Target? = null
     private val stMatrix = FloatArray(16)
@@ -86,6 +87,8 @@ class GlFrameRenderer {
 
     fun release() {
         runBlocking {
+            released = true
+            cameraTexture.setOnFrameAvailableListener(null)
             encoder?.let { EGL14.eglDestroySurface(display, it.surface) }
             preview?.let { EGL14.eglDestroySurface(display, it.surface) }
             encoder = null
@@ -176,6 +179,8 @@ class GlFrameRenderer {
     }
 
     private fun drawFrame() {
+        // A frame callback queued before release() must not touch the released SurfaceTexture.
+        if (released) return
         EGL14.eglMakeCurrent(display, placeholderSurface, placeholderSurface, context)
         cameraTexture.updateTexImage()
         cameraTexture.getTransformMatrix(stMatrix)
