@@ -336,8 +336,20 @@ struct FrameStreamServerTests {
         #expect(tcp.startedQueues.count == 1)
         #expect(quic.service == NWListener.Service(name: "Mac", type: "_cam2mac._udp"))
         #expect(tcp.service == NWListener.Service(name: "Mac", type: "_cam2mac._tcp"))
-        #expect(quic.serviceNameRegisteredHandler != nil)
-        #expect(tcp.serviceNameRegisteredHandler == nil)
+
+        // The QR code carries the QUIC listener's registered name; the TCP one must not replace it.
+        quic.serviceNameRegisteredHandler?("Mac (2)")
+        tcp.serviceNameRegisteredHandler?("Mac")
+        #expect(server.state.advertisedServiceName.value == "Mac (2)")
+    }
+
+    @Test
+    func realListenersReportServiceTypeOfTheirTransport() throws {
+        let quic = NWListenerAdapter(listener: try NWListener(using: TransportNetworkProtocol.commonQUIC.nwParameters))
+        let tcp = NWListenerAdapter(listener: try NWListener(using: .tcp))
+
+        #expect(quic.serviceType == "_cam2mac._udp")
+        #expect(tcp.serviceType == "_cam2mac._tcp")
     }
 
     @Test

@@ -108,13 +108,16 @@ public actor FrameStreamServer {
             }
 
             listener.stateUpdateHandler = { [state] listenerState in
-                state.listenerState.value = listenerStates.update(listenerState, at: index)
+                listenerStates.update(listenerState, at: index) { state.listenerState.value = $0 }
             }
 
             if let serviceName {
                 listener.service = NWListener.Service(name: serviceName, type: listener.serviceType)
-                if index == 0 {
-                    listener.serviceNameRegisteredHandler = { [state] name in
+                listener.serviceNameRegisteredHandler = { [state] name in
+                    // Bonjour resolves name conflicts per service type, so the names can differ.
+                    listenerStates.register(name, at: index)
+                    // The QR code carries the first (QUIC) listener's name.
+                    if index == 0 {
                         state.advertisedServiceName.value = name
                     }
                 }
@@ -382,17 +385,40 @@ public actor FrameStreamServer {
 
 /// Combines the states of several listeners into the one state the UI shows.
 private final class ListenerStates: Sendable {
-    private let states: Mutex<[TransportListenerState]>
-
-    init(count: Int) {
-        states = Mutex(Array(repeating: .setup, count: count))
+    private struct Entry {
+        var state = TransportListenerState.setup
+        var registeredName: String?
     }
 
-    /// Records `listenerState` for the listener at `index` and returns the combined state.
-    func update(_ listenerState: TransportListenerState, at index: Int) -> TransportListenerState {
-        states.withLock { states in
-            states[index] = listenerState
-            return Self.combined(states)
+    private let entries: Mutex<[Entry]>
+
+    init(count: Int) {
+        entries = Mutex(Array(repeating: Entry(), count: count))
+    }
+
+    /// Records `listenerState` for the listener at `index` and publishes the combined state.
+    ///
+    /// Listener callbacks run on a concurrent queue, so `publish` runs under the lock;
+    /// otherwise an older combined state could overwrite a newer one.
+    func update(
+        _ listenerState: TransportListenerState,
+        at index: Int,
+        publish: (TransportListenerState) -> Void
+    ) {
+        entries.withLock { entries in
+            entries[index].state = listenerState
+            publish(Self.combined(entries.map(\.state)))
+        }
+    }
+
+    /// Records the Bonjour name the listener at `index` registered, warning when transports disagree.
+    func register(_ name: String, at index: Int) {
+        entries.withLock { entries in
+            entries[index].registeredName = name
+            let names = Set(entries.compactMap(\.registeredName))
+            if names.count > 1 {
+                debugPrint("⚠️ Bonjour registered different names per transport:", names.sorted())
+            }
         }
     }
 
