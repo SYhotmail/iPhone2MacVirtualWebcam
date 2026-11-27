@@ -112,24 +112,34 @@ class FrameStreamClientTest {
         assertTrue("[0x01] did not trigger a keyframe request", keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
     }
 
-    @Test
-    fun framesArriveInOrderWhenTheSendQueueBacksUp() {
+    /** Sends frames of [sizes] back-to-back (the first two are keyframes) and returns the IDs the Mac would deliver. */
+    private fun deliveredFrameIDs(sizes: List<Int>): List<Int> {
         val keyframeRequests = Semaphore(0)
         // No backlog dropping: this checks the order Kwik puts datagrams on the wire.
         val streamClient = makeClient(onKeyframeRequest = { keyframeRequests.release() }, backlogLimitBytes = 1L shl 40)
         streamClient.start()
         val peer = acceptStreaming(keyframeRequests)
-
-        // Two IDRs are far beyond the initial congestion window, so most datagrams wait in Kwik's queue. The small
-        // deltas after them (less than one chunk each) must not slip in front of a queued full-size chunk.
-        val sizes = listOf(150_000, 150_000) + List(20) { 200 + it * 97 }
         sizes.forEachIndexed { index, size ->
             streamClient.send(ByteArray(size) { (it % 251).toByte() }, isKeyframe = index < 2)
         }
-
         val frames = InOrderReassembler(peer.datagrams)
-        val completed = generateSequence { frames.next(timeoutMillis = 3_000) }.take(sizes.size).map { it.frameID }.toList()
-        assertEquals(sizes.indices.toList(), completed)
+        return generateSequence { frames.next(timeoutMillis = 3_000) }.take(sizes.size).map { it.frameID }.toList()
+    }
+
+    @Test
+    fun framesArriveInOrderWhenTheSendQueueBacksUp() {
+        // Two IDRs are far beyond the initial congestion window, so most datagrams wait in Kwik's queue (LIFO with
+        // sendDatagram: frame 0 never completes).
+        val sizes = listOf(150_000, 150_000) + List(5) { 8_000 }
+        assertEquals(sizes.indices.toList(), deliveredFrameIDs(sizes))
+    }
+
+    @Test
+    fun smallDatagramsDoNotOvertakeQueuedFullSizeOnes() {
+        // Deltas smaller than one chunk fit space a full-size chunk doesn't; Kwik's first-fit queue would send them
+        // first even with FIFO (addLast) requests.
+        val sizes = listOf(150_000, 150_000) + List(20) { 200 + it * 97 }
+        assertEquals(sizes.indices.toList(), deliveredFrameIDs(sizes))
     }
 
     @Test
