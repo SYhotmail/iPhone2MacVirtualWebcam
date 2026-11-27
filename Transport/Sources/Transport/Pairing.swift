@@ -3,8 +3,10 @@ import Foundation
 
 /// Bonjour advertisement used by the Mac receiver.
 public enum FrameStreamService {
-    /// QUIC runs over UDP.
+    /// QUIC runs over UDP (iPhone).
     public static let type = "_cam2mac._udp"
+    /// TLS over TCP (Android, which has no QUIC datagram API).
+    public static let tcpType = "_cam2mac._tcp"
     public static let domain = "local."
 
     /// SHA-256 of a DER-encoded certificate. Clients pin this value.

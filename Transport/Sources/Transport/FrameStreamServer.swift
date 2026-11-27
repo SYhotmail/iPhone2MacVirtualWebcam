@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import Network
+import Synchronization
 
 /// Shared observable server state for UI-facing consumers.
 public final class FrameStreamServerState: @unchecked Sendable {
@@ -12,11 +13,14 @@ public final class FrameStreamServerState: @unchecked Sendable {
     public init() {}
 }
 
-/// Receives frame data from a single client over the configured network transport.
+/// Receives frame data from a single client over one or more network transports.
 ///
 /// Every connection must first send a `PairingHello`; frames are only accepted after the
 /// injected authorizer approves it. Over QUIC, frames arrive as datagrams and are reassembled
 /// with `FrameReassembler`; over TCP, they arrive length-prefixed on the stream.
+///
+/// All listeners (for example QUIC for iPhone and TLS/TCP for Android) share one connection
+/// slot, so only one client streams at a time whichever transport it uses.
 public actor FrameStreamServer {
     public typealias HelloAuthorizer = @Sendable (PairingHello) async -> PairingReply
 
@@ -26,14 +30,7 @@ public actor FrameStreamServer {
     private var onFrame: (@Sendable (Data) -> Void)?
     private var onStreamUnavailable: (@Sendable () -> Void)?
 
-    private var listener: (any TransportListener)! {
-        didSet {
-            guard let oldValue, oldValue !== listener else {
-                return
-            }
-            oldValue.cancel()
-        }
-    }
+    private var listeners = [any TransportListener]()
 
     private var connections = [any TransportConnection]()
     private var inactivityTimers = [ObjectIdentifier: DispatchWorkItem]()
@@ -45,25 +42,35 @@ public actor FrameStreamServer {
     private let connectionQueue = DispatchQueue.global(qos: .userInitiated)
     typealias TransportListenerFactory = @Sendable (NWEndpoint.Port) throws -> any TransportListener
     public typealias NWListenerFactory = @Sendable (NWEndpoint.Port) throws -> NWListener
-    private let listenerFactory: TransportListenerFactory
+    private let listenerFactories: [TransportListenerFactory]
 
     public init(transport: TransportNetworkProtocol = .tcp) {
         let parameters = transport.nwParameters
-        self.init { port in
+        self.init(listenerFactory: { port in
             let listener = try NWListener(using: parameters, on: port)
             return NWListenerAdapter(listener: listener)
-        }
+        })
     }
 
     public init(listenerBuilder: @escaping NWListenerFactory) {
-        self.init { port in
-            try NWListenerAdapter(listener: listenerBuilder(port))
-        }
+        self.init(listenerBuilders: [listenerBuilder])
+    }
+
+    /// One listener per builder, all started on `start(on:serviceName:)` and sharing one client slot.
+    public init(listenerBuilders: [NWListenerFactory]) {
+        self.init(listenerFactories: listenerBuilders.map { builder in
+            { port in try NWListenerAdapter(listener: builder(port)) }
+        })
     }
 
     init(listenerFactory: @escaping TransportListenerFactory) {
+        self.init(listenerFactories: [listenerFactory])
+    }
+
+    init(listenerFactories: [TransportListenerFactory]) {
+        precondition(!listenerFactories.isEmpty, "FrameStreamServer needs at least one listener")
         self.state = FrameStreamServerState()
-        self.listenerFactory = listenerFactory
+        self.listenerFactories = listenerFactories
     }
 
     public func setFrameHandler(_ handler: (@Sendable (Data) -> Void)?) {
@@ -78,33 +85,47 @@ public actor FrameStreamServer {
         onStreamUnavailable = handler
     }
 
-    /// Starts listening on `port`, advertising `serviceName` over Bonjour when given.
+    /// Starts every listener on `port`, advertising `serviceName` over Bonjour when given.
+    ///
+    /// Each listener advertises its own service type under the same name. The published
+    /// `advertisedServiceName` comes from the first listener.
     public func start(on port: UInt16, serviceName: String? = nil) throws {
         guard let portValue = NWEndpoint.Port(rawValue: port) else {
             throw NSError(domain: "frame-stream-server", code: .min, userInfo: [NSLocalizedFailureErrorKey: "Invalid port \(port)"])
         }
 
-        let listener = try listenerFactory(portValue)
-        listener.newConnectionHandler = { [weak self] connection in
-            guard let self else { return }
-            Task {
-                await self.handleNewConnection(connection)
+        // Create all listeners before starting any, so a failure leaves nothing half-running.
+        let newListeners = try listenerFactories.map { try $0(portValue) }
+        stopListeners()
+
+        let listenerStates = ListenerStates(count: newListeners.count)
+        for (index, listener) in newListeners.enumerated() {
+            listener.newConnectionHandler = { [weak self] connection in
+                guard let self else { return }
+                Task {
+                    await self.handleNewConnection(connection)
+                }
+            }
+
+            listener.stateUpdateHandler = { [state] listenerState in
+                listenerStates.update(listenerState, at: index) { state.listenerState.value = $0 }
+            }
+
+            if let serviceName {
+                listener.service = NWListener.Service(name: serviceName, type: listener.serviceType)
+                listener.serviceNameRegisteredHandler = { [state] name in
+                    // Bonjour resolves name conflicts per service type, so the names can differ.
+                    listenerStates.register(name, at: index)
+                    // The QR code carries the first (QUIC) listener's name.
+                    if index == 0 {
+                        state.advertisedServiceName.value = name
+                    }
+                }
             }
         }
 
-        listener.stateUpdateHandler = { [state] listenerState in
-            state.listenerState.value = listenerState
-        }
-
-        if let serviceName {
-            listener.service = NWListener.Service(name: serviceName, type: FrameStreamService.type)
-            listener.serviceNameRegisteredHandler = { [state] name in
-                state.advertisedServiceName.value = name
-            }
-        }
-
-        self.listener = listener
-        listener.start(queue: connectionQueue)
+        listeners = newListeners
+        newListeners.forEach { $0.start(queue: connectionQueue) }
     }
 
     public func disconnectClients(forcefully: Bool = false) {
@@ -123,14 +144,20 @@ public actor FrameStreamServer {
     }
 
     public func stop() {
-        guard let listener else {
+        guard !listeners.isEmpty else {
             return
         }
-        listener.cancel()
+        stopListeners()
         disconnectClients()
-        listener.stateUpdateHandler = nil
-        self.listener = nil
         state.advertisedServiceName.value = nil
+    }
+
+    private func stopListeners() {
+        listeners.forEach {
+            $0.cancel()
+            $0.stateUpdateHandler = nil
+        }
+        listeners.removeAll()
     }
 
     private func handleConnectionStateUpdate(_ connectionState: TransportConnectionState, for connection: any TransportConnection) {
@@ -169,7 +196,7 @@ public actor FrameStreamServer {
         if let existingConnection = connections.first {
             let existingConnectionID = ObjectIdentifier(existingConnection)
             if streamingConnectionIDs.contains(existingConnectionID) {
-                debugPrint("🚫 Rejecting additional client while another iOS stream is active")
+                debugPrint("🚫 Rejecting additional client while another stream is active")
                 connection.forceCancel()
                 return
             }
@@ -353,5 +380,62 @@ public actor FrameStreamServer {
         remove(connection)
         state.connectionState.value = .cancelled
         onStreamUnavailable?()
+    }
+}
+
+/// Combines the states of several listeners into the one state the UI shows.
+private final class ListenerStates: Sendable {
+    private struct Entry {
+        var state = TransportListenerState.setup
+        var registeredName: String?
+    }
+
+    private let entries: Mutex<[Entry]>
+
+    init(count: Int) {
+        entries = Mutex(Array(repeating: Entry(), count: count))
+    }
+
+    /// Records `listenerState` for the listener at `index` and publishes the combined state.
+    ///
+    /// Listener callbacks run on a concurrent queue, so `publish` runs under the lock;
+    /// otherwise an older combined state could overwrite a newer one.
+    func update(
+        _ listenerState: TransportListenerState,
+        at index: Int,
+        publish: (TransportListenerState) -> Void
+    ) {
+        entries.withLock { entries in
+            entries[index].state = listenerState
+            publish(Self.combined(entries.map(\.state)))
+        }
+    }
+
+    /// Records the Bonjour name the listener at `index` registered, warning when transports disagree.
+    func register(_ name: String, at index: Int) {
+        entries.withLock { entries in
+            entries[index].registeredName = name
+            let names = Set(entries.compactMap(\.registeredName))
+            if names.count > 1 {
+                debugPrint("⚠️ Bonjour registered different names per transport:", names.sorted())
+            }
+        }
+    }
+
+    /// A failure or wait on any listener wins; ready only when every listener is ready.
+    static func combined(_ states: [TransportListenerState]) -> TransportListenerState {
+        if let failed = states.first(where: { if case .failed = $0 { true } else { false } }) {
+            return failed
+        }
+        if let waiting = states.first(where: { if case .waiting = $0 { true } else { false } }) {
+            return waiting
+        }
+        if states.allSatisfy({ $0 == .ready }) {
+            return .ready
+        }
+        if states.allSatisfy({ $0 == .cancelled }) {
+            return .cancelled
+        }
+        return .setup
     }
 }
