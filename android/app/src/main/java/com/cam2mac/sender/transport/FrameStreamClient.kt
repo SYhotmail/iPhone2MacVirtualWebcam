@@ -6,13 +6,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.serialization.SerializationException
-import java.io.BufferedOutputStream
+import tech.kwik.core.QuicClientConnection
+import tech.kwik.core.QuicStream
 import java.io.EOFException
 import java.io.IOException
 import java.net.InetSocketAddress
-import java.net.Socket
-import java.util.concurrent.atomic.AtomicReference
-import javax.net.ssl.SSLSocket
+import java.time.Duration
+import java.util.Timer
+import kotlin.concurrent.schedule
 
 sealed interface StreamStatus {
     data object Idle : StreamStatus
@@ -25,11 +26,13 @@ sealed interface StreamStatus {
 }
 
 /**
- * Streams HEVC access units to the Mac over TLS 1.3/TCP, using the stream framing of `FrameStreamServer`.
+ * Streams HEVC access units to the Mac like the iPhone app does: one QUIC connection (ALPN `camera-lan-stream`)
+ * with a bidirectional stream for pairing and control messages (`FramePacket` framing) and QUIC datagrams
+ * (RFC 9221) for video, split with [VideoDatagram].
  *
- * One connection attempt loop runs on its own thread: resolve, connect, send the hello, then write queued frames
- * while a reader thread handles control packets. Lost connections are retried with backoff. Single use:
- * create a new client after [close].
+ * One connection loop runs on its own thread: resolve, connect, check the certificate pin, send the hello, then
+ * read control packets until the connection ends. Video is sent from the caller's thread by [send]. Lost
+ * connections are retried with backoff. Single use: create a new client after [close].
  */
 class FrameStreamClient(
     /**
@@ -42,20 +45,21 @@ class FrameStreamClient(
     private val hello: () -> PairingHello,
     /** The Mac accepted [hello]. */
     private val onAccepted: (PairingHello) -> Unit,
-    /** The Mac or the send queue needs a keyframe. Called from client threads. */
+    /** The Mac needs a keyframe (after a loss, or because streaming just started). Called from client threads. */
     private val onKeyframeRequest: () -> Unit,
-    private val queueCapacity: Int = 8,
-    private val connectTimeoutMillis: Int = 5_000,
+    private val connectTimeoutMillis: Long = 5_000,
 ) {
     private val _status = MutableStateFlow<StreamStatus>(StreamStatus.Idle)
     val status: StateFlow<StreamStatus> = _status.asStateFlow()
 
-    private val queue = FrameQueue(queueCapacity)
-
     @Volatile private var running = false
-    /** The current connection's TCP socket. Other threads close this one, never the TLS socket: no TLS I/O. */
-    @Volatile private var tcpSocket: Socket? = null
+    /** The current connection; other threads only call its non-blocking `close()`. */
+    @Volatile private var connection: QuicClientConnection? = null
+    /** Set while authenticated; [send] writes datagrams to it. */
+    @Volatile private var video: VideoSender? = null
     private var thread: Thread? = null
+    /** Closes connections whose reply is late: Kwik stream reads have no timeout. */
+    private val deadlines = Timer("FrameStreamClient-deadlines", true)
 
     fun start() {
         check(thread == null) { "FrameStreamClient is single use" }
@@ -63,21 +67,22 @@ class FrameStreamClient(
         thread = Thread(::runConnectionLoop, "FrameStreamClient").apply { start() }
     }
 
-    /** Safe on the main thread: closes the TCP socket without TLS I/O, so it neither blocks nor touches the network. */
+    /** Safe on the main thread: Kwik's `close()` only queues a CONNECTION_CLOSE for its sender thread. */
     fun close() {
         running = false
-        runCatching { tcpSocket?.close() }
+        video = null
+        runCatching { connection?.close() }
         thread?.interrupt()
-        queue.wake()
+        deadlines.cancel()
         _status.value = StreamStatus.Idle
     }
 
     /**
-     * Queues one access unit. Frames are dropped while not connected. When the queue is full, non-keyframes are
-     * dropped until the next keyframe (they would reference a dropped frame), and a keyframe is requested.
+     * Sends one access unit as datagrams. Frames are dropped while not connected, and after (re)connecting
+     * until the first keyframe: the Mac can't decode deltas without it.
      */
     fun send(frame: ByteArray, isKeyframe: Boolean) {
-        if (queue.offer(frame, isKeyframe)) onKeyframeRequest()
+        video?.send(frame, isKeyframe)
     }
 
     private fun runConnectionLoop() {
@@ -85,15 +90,20 @@ class FrameStreamClient(
         while (running) {
             try {
                 _status.value = StreamStatus.Connecting
-                connectToPinnedReceiver().use { tls ->
-                    authenticate(tls)
+                val quic = connectToPinnedReceiver()
+                try {
+                    val control = authenticate(quic)
                     attempt = 0
-                    stream(tls)
+                    stream(quic, control)
+                } finally {
+                    video = null
+                    quic.close()
                 }
             } catch (error: RejectedException) {
                 fail(error.message ?: "The Mac rejected the connection")
                 return
             } catch (error: Exception) {
+                // RuntimeException included: Kwik reports some failures unchecked, and none may kill the loop.
                 if (error is InterruptedException || !running) break
                 // A mismatch may be another Mac with the same name while ours is offline, so keep trying.
                 val reason = if (error.hasCause<FingerprintMismatchException>()) {
@@ -117,11 +127,11 @@ class FrameStreamClient(
         running = false
     }
 
-    /** Connects to the first candidate whose TLS handshake passes the certificate pin. */
-    private fun connectToPinnedReceiver(): SSLSocket {
-        var failure: IOException? = null
+    /** Connects to the first candidate whose certificate passes the pin. */
+    private fun connectToPinnedReceiver(): QuicClientConnection {
+        var failure: Exception? = null
         // Prefer reporting a mismatch: it tells the user a same-named Mac was found.
-        fun record(error: IOException) {
+        fun record(error: Exception) {
             if (failure?.hasCause<FingerprintMismatchException>() != true) failure = error
         }
         val addresses = candidates().iterator()
@@ -135,42 +145,54 @@ class FrameStreamClient(
             }
             try {
                 return connect(address)
-            } catch (error: IOException) {
-                if (!running) throw error
+            } catch (error: Exception) {
+                if (!running || error is InterruptedException) throw error
                 record(error)
             }
         }
         throw failure ?: IOException("Could not find the Mac on this network")
     }
 
-    private fun connect(address: InetSocketAddress): SSLSocket {
-        val tcp = Socket()
-        tcpSocket = tcp
+    private fun connect(address: InetSocketAddress): QuicClientConnection {
+        val quic = QuicClientConnection.newBuilder()
+            .host(address.address.hostAddress)
+            .port(address.port)
+            .applicationProtocol(APPLICATION_PROTOCOL)
+            .enableDatagramExtension()
+            // Kwik has no hook for a custom trust manager, so the certificate is pinned right after the handshake
+            // instead (below). This is safe: the pin compares the whole leaf certificate, whose key signed the
+            // handshake (TLS 1.3 CertificateVerify, which Kwik verifies even without a certificate check), and
+            // the hello with the pairing token or secret is only sent after the pin matched.
+            .noServerCertificateCheck()
+            .connectTimeout(Duration.ofMillis(connectTimeoutMillis))
+            .maxIdleTimeout(Duration.ofMillis(IDLE_TIMEOUT_MILLIS))
+            .build()
+        connection = quic
         try {
             if (!running) throw IOException("Stopped")
-            tcp.tcpNoDelay = true
-            tcp.connect(address, connectTimeoutMillis)
-            val tls = trust.sslContext().socketFactory
-                .createSocket(tcp, address.hostString, address.port, true) as SSLSocket
-            tls.enabledProtocols = arrayOf("TLSv1.3")
-            tls.soTimeout = connectTimeoutMillis
-            tls.startHandshake()
-            return tls
-        } catch (error: IOException) {
-            tcp.close()
+            quic.connect()
+            trust.check(quic.serverCertificateChain)
+            return quic
+        } catch (error: Exception) {
+            quic.close()
             throw error
         }
     }
 
-    private fun authenticate(tls: SSLSocket) {
+    private fun authenticate(quic: QuicClientConnection): QuicStream {
         val hello = hello()
-        val output = tls.outputStream
-        FramePacket.write(output, hello.encode())
-        output.flush()
+        val control = quic.createStream(true)
+        FramePacket.write(control.outputStream, hello.encode())
+        control.outputStream.flush()
+        val replyDeadline = deadlines.schedule(connectTimeoutMillis) { quic.close() }
         val reply = try {
-            PairingReply.decode(FramePacket.read(tls.inputStream, MAXIMUM_CONTROL_PACKET_BYTES))
+            PairingReply.decode(FramePacket.read(control.inputStream, MAXIMUM_CONTROL_PACKET_BYTES))
         } catch (error: SerializationException) {
             throw IOException("Unreadable reply from the Mac", error)
+        } catch (error: IOException) {
+            throw if (error is EOFException) IOException("The Mac closed the connection") else error
+        } finally {
+            replyDeadline.cancel()
         }
         if (!reply.ok) {
             val reason = reply.reason ?: "The Mac rejected the connection"
@@ -179,54 +201,55 @@ class FrameStreamClient(
             throw RejectedException(reason)
         }
         onAccepted(hello)
-        tls.soTimeout = 0
+        return control
     }
 
-    private fun stream(tls: SSLSocket) {
-        queue.open()
+    /** Reads control packets until the connection ends; video goes out through [send] meanwhile. */
+    private fun stream(quic: QuicClientConnection, control: QuicStream) {
+        video = VideoSender(quic)
         _status.value = StreamStatus.Streaming
         // The Mac drops connections that send no frame for 2 s, and it needs parameter sets first.
         onKeyframeRequest()
-
-        val readerFailure = AtomicReference<IOException?>(null)
-        val reader = Thread({
-            try {
-                while (true) {
-                    val packet = FramePacket.read(tls.inputStream, MAXIMUM_CONTROL_PACKET_BYTES)
-                    if (packet.size == 1 && packet[0] == KEYFRAME_REQUEST) onKeyframeRequest()
-                }
-            } catch (error: IOException) {
-                readerFailure.set(if (error is EOFException) IOException("The Mac closed the connection") else error)
-                // Unblocks a writer stuck on a full send buffer.
-                runCatching { tcpSocket?.close() }
-                queue.wake()
-            }
-        }, "FrameStreamClient-reader")
-        reader.start()
-
-        val output = BufferedOutputStream(tls.outputStream, 64 * 1024)
         try {
             while (running) {
-                readerFailure.get()?.let { throw it }
-                val frame = queue.poll(100)
-                readerFailure.get()?.let { throw it }
-                if (frame == null) continue
-                FramePacket.write(output, frame)
-                output.flush()
+                val packet = FramePacket.read(control.inputStream, MAXIMUM_CONTROL_PACKET_BYTES)
+                if (packet.size == 1 && packet[0] == KEYFRAME_REQUEST) onKeyframeRequest()
             }
-        } catch (_: InterruptedException) {
-            // close() interrupts the thread; the loop condition ends streaming.
-        } finally {
-            queue.close()
-            tls.close()
+        } catch (error: IOException) {
+            if (!running) return
+            throw if (error is EOFException) IOException("The Mac closed the connection") else error
+        }
+    }
+
+    /** Video for one connection: frame IDs start at 0, and the first frame sent is a keyframe. */
+    private class VideoSender(private val quic: QuicClientConnection) {
+        private var nextFrameID = 0
+        private var waitingForKeyframe = true
+
+        @Synchronized
+        fun send(frame: ByteArray, isKeyframe: Boolean) {
+            if (waitingForKeyframe && !isKeyframe) return
+            val maximumSize = minOf(quic.maxDatagramDataSize(), VideoDatagram.MAXIMUM_DATAGRAM_SIZE)
+            val datagrams = VideoDatagram.chunks(frame, nextFrameID, isKeyframe, maximumSize)
+            if (datagrams.isEmpty()) return
+            waitingForKeyframe = false
+            nextFrameID++ // Wraps like the Mac's UInt32 frame IDs.
+            try {
+                datagrams.forEach(quic::sendDatagram)
+            } catch (_: RuntimeException) {
+                // The connection is closing; the connection loop reports it.
+            }
         }
     }
 
     private class RejectedException(reason: String) : IOException(reason)
 
     private companion object {
+        const val APPLICATION_PROTOCOL = "camera-lan-stream"
         const val KEYFRAME_REQUEST: Byte = 0x01
         const val MAXIMUM_CONTROL_PACKET_BYTES = 4096
+        /** Notices a Mac that vanished; video keeps the connection busy, so this never fires while streaming. */
+        const val IDLE_TIMEOUT_MILLIS = 5_000L
         /** `FrameStreamServer` sends this while it has no hello authorizer yet. */
         const val NOT_ACCEPTING_REASON = "Receiver is not accepting connections"
 

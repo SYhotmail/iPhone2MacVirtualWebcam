@@ -12,8 +12,6 @@ import java.security.MessageDigest
 import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
 import java.util.Date
-import javax.net.ssl.KeyManagerFactory
-import javax.net.ssl.SSLContext
 
 /** A self-signed P-256 identity like the one each Mac creates (`SelfSignedCertificate`). */
 class TestIdentity {
@@ -31,14 +29,13 @@ class TestIdentity {
 
     val fingerprint: ByteArray = MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
 
-    fun serverContext(): SSLContext {
-        val password = CharArray(0)
-        val keyStore = KeyStore.getInstance("PKCS12").apply {
-            load(null)
-            setKeyEntry("mac", keyPair.private, password, arrayOf(certificate))
-        }
-        val keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-            .apply { init(keyStore, password) }.keyManagers
-        return SSLContext.getInstance("TLS").apply { init(keyManagers, null, null) }
+    /** A key store holding this identity under [ALIAS], with an empty password. */
+    fun keyStore(): KeyStore = KeyStore.getInstance("PKCS12").apply {
+        load(null)
+        setKeyEntry(ALIAS, keyPair.private, CharArray(0), arrayOf(certificate))
+    }
+
+    companion object {
+        const val ALIAS = "mac"
     }
 }

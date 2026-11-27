@@ -11,6 +11,7 @@ serialization = "1.9.0"
 coroutines = "1.10.2"
 junit = "4.13.2"
 bouncycastle = "1.81"
+kwik = "0.10.3"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -28,6 +29,7 @@ datastore-preferences = { module = "androidx.datastore:datastore-preferences", v
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 junit = { module = "junit:junit", version.ref = "junit" }
+kwik = { module = "tech.kwik:kwik", version.ref = "kwik" }
 bouncycastle-pkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 
 [plugins]

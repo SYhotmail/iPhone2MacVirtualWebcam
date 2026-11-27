@@ -9,7 +9,7 @@ This file gives coding agents a fast, practical orientation for this repository.
 Main pieces:
 
 - `FrontCameraContinuation/FrontCameraContinuation`: iPhone sender app
-- `android/`: Android sender app (Kotlin, Jetpack Compose), streams over TLS/TCP
+- `android/`: Android sender app (Kotlin, Jetpack Compose), streams over QUIC datagrams like the iPhone (Kwik)
 - `FrontCameraContinuation/TCPServer`: macOS receiver app
 - `FrontCameraContinuation/VirtualCameraExtension`: CoreMediaIO virtual camera extension
 - `Transport`: shared networking/transport package
