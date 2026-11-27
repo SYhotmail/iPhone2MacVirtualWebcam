@@ -5,6 +5,7 @@ import com.cam2mac.sender.pairing.PairingHello
 import com.cam2mac.sender.pairing.PairingInvitation
 import com.cam2mac.sender.pairing.PairingReply
 import com.cam2mac.sender.transport.FramePacket
+import com.cam2mac.sender.transport.VideoDatagram
 import com.cam2mac.sender.video.AccessUnitAssembler
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -15,6 +16,7 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -97,6 +99,20 @@ class ProtocolFixtureTest {
             assertArrayEquals(case.string("name"), case.hex("normalizedHex"), normalized)
             // Normalizing what the Mac receives must be a no-op.
             assertArrayEquals(case.string("name"), normalized, AccessUnitAssembler.normalizeStartCodes(normalized))
+        }
+    }
+
+    @Test
+    fun videoDatagramsMatchFixtures() {
+        for (case in fixture("video-datagram.json").cases()) {
+            val datagrams = VideoDatagram.chunks(
+                frame = case.hex("frameHex"),
+                frameID = case.getValue("frameID").jsonPrimitive.long.toInt(), // u32 as Int bits
+                isKeyframe = case.getValue("isKeyframe").jsonPrimitive.booleanOrNull!!,
+                maximumDatagramSize = case.getValue("maximumDatagramSize").jsonPrimitive.content.toInt(),
+            )
+            val expected = case.getValue("datagramsHex").jsonArray.map { it.jsonPrimitive.content }
+            assertEquals(case.string("name"), expected, datagrams.map(Hex::encode))
         }
     }
 }

@@ -11,21 +11,19 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
-import java.net.InetAddress
+import tech.kwik.core.QuicStream
 import java.net.InetSocketAddress
-import java.net.Socket
 import java.util.UUID
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.SSLServerSocket
 
 class FrameStreamClientTest {
     private val mac = TestIdentity()
-    private val server = mac.serverContext().serverSocketFactory
-        .createServerSocket(0, 1, InetAddress.getLoopbackAddress()) as SSLServerSocket
+    private val receiver = QuicTestReceiver(mac)
     private val clientID = UUID.randomUUID()
     private val secret = ByteArray(32) { 7 }
     private var client: FrameStreamClient? = null
@@ -33,7 +31,7 @@ class FrameStreamClientTest {
     @After
     fun tearDown() {
         client?.close()
-        server.close()
+        receiver.close()
     }
 
     private fun makeClient(
@@ -41,57 +39,133 @@ class FrameStreamClientTest {
         hello: () -> PairingHello = { PairingHello.hello(clientID, secret) },
         onAccepted: (PairingHello) -> Unit = {},
         onKeyframeRequest: () -> Unit = {},
-        candidates: () -> Sequence<InetSocketAddress> = { sequenceOf(serverAddress(server)) },
+        candidates: () -> Sequence<InetSocketAddress> = { sequenceOf(receiver.address) },
+        backlogLimitBytes: Long = SendBacklog.DEFAULT_LIMIT_BYTES,
     ) = FrameStreamClient(
         candidates = candidates,
         trust = PinnedTrust(fingerprint),
         hello = hello,
         onAccepted = onAccepted,
         onKeyframeRequest = onKeyframeRequest,
+        backlogLimitBytes = backlogLimitBytes,
     ).also { client = it }
 
-    private fun serverAddress(server: SSLServerSocket) = InetSocketAddress(InetAddress.getLoopbackAddress(), server.localPort)
+    /** Accepts the next connection, answers its hello with ok and waits until the client streams on it. */
+    private fun acceptStreaming(keyframeRequests: Semaphore): QuicTestReceiver.Peer {
+        val peer = receiver.accept()
+        val control = peer.control()
+        control.readHello()
+        control.reply("""{"ok":true}""")
+        // The client requests a keyframe as soon as it can send video on this connection.
+        assertTrue(keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
+        return peer
+    }
 
-    private fun Socket.readHello(): JsonObject {
-        soTimeout = 5_000
-        val payload = FramePacket.read(getInputStream(), 4096)
+    private fun InOrderReassembler.assertNext(frameID: Int, isKeyframe: Boolean, data: ByteArray) {
+        val frame = checkNotNull(next()) { "frame $frameID never completed" }
+        assertEquals(frameID, frame.frameID)
+        assertEquals(isKeyframe, frame.isKeyframe)
+        assertArrayEquals(data, frame.data)
+    }
+
+    private fun QuicStream.readHello(): JsonObject {
+        val payload = FramePacket.read(inputStream, 4096)
         return Json.parseToJsonElement(payload.toString(Charsets.UTF_8)).jsonObject
     }
 
-    private fun Socket.reply(json: String) {
-        FramePacket.write(getOutputStream(), json.toByteArray())
-        getOutputStream().flush()
+    private fun QuicStream.reply(payload: ByteArray) {
+        FramePacket.write(outputStream, payload)
+        outputStream.flush()
+    }
+
+    private fun QuicStream.reply(json: String) = reply(json.toByteArray())
+
+    @Test
+    fun streamsDatagramsAndHandlesKeyframeRequests() {
+        val keyframeRequests = Semaphore(0)
+        val streamClient = makeClient(onKeyframeRequest = { keyframeRequests.release() })
+        streamClient.start()
+
+        val peer = receiver.accept()
+        val control = peer.control()
+        val hello = control.readHello()
+        assertEquals("hello", hello["type"]?.jsonPrimitive?.content)
+        assertEquals(clientID.toString().uppercase(), hello["clientID"]?.jsonPrimitive?.content)
+        control.reply("""{"ok":true}""")
+
+        // Streaming starts with a keyframe request so the Mac gets parameter sets within its 2 s timeout.
+        assertTrue(keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
+        runBlocking { withTimeout(5_000) { streamClient.status.first { it == StreamStatus.Streaming } } }
+
+        // Deltas before the first keyframe are useless to the Mac and dropped.
+        streamClient.send(byteArrayOf(0, 0, 0, 1, 0x02, 0x01), isKeyframe = false)
+        val keyframe = ByteArray(3_000) { it.toByte() }
+        streamClient.send(keyframe, isKeyframe = true)
+        val delta = byteArrayOf(0, 0, 0, 1, 0x02, 0x01, 0x55)
+        streamClient.send(delta, isKeyframe = false)
+        // Had the leading delta gone out, it would be frame 0.
+        val frames = InOrderReassembler(peer.datagrams)
+        frames.assertNext(frameID = 0, isKeyframe = true, data = keyframe)
+        frames.assertNext(frameID = 1, isKeyframe = false, data = delta)
+
+        control.reply(byteArrayOf(0x01))
+        assertTrue("[0x01] did not trigger a keyframe request", keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
+    }
+
+    /** Sends frames of [sizes] back-to-back (the first two are keyframes) and returns the IDs the Mac would deliver. */
+    private fun deliveredFrameIDs(sizes: List<Int>): List<Int> {
+        val keyframeRequests = Semaphore(0)
+        // No backlog dropping: this checks the order Kwik puts datagrams on the wire.
+        val streamClient = makeClient(onKeyframeRequest = { keyframeRequests.release() }, backlogLimitBytes = 1L shl 40)
+        streamClient.start()
+        val peer = acceptStreaming(keyframeRequests)
+        sizes.forEachIndexed { index, size ->
+            streamClient.send(ByteArray(size) { (it % 251).toByte() }, isKeyframe = index < 2)
+        }
+        val frames = InOrderReassembler(peer.datagrams)
+        return generateSequence { frames.next(timeoutMillis = 3_000) }.take(sizes.size).map { it.frameID }.toList()
     }
 
     @Test
-    fun streamsFramesAndHandlesKeyframeRequests() {
+    fun framesArriveInOrderWhenTheSendQueueBacksUp() {
+        // Two IDRs are far beyond the initial congestion window, so most datagrams wait in Kwik's queue (LIFO with
+        // sendDatagram: frame 0 never completes).
+        val sizes = listOf(150_000, 150_000) + List(5) { 8_000 }
+        assertEquals(sizes.indices.toList(), deliveredFrameIDs(sizes))
+    }
+
+    @Test
+    fun smallDatagramsDoNotOvertakeQueuedFullSizeOnes() {
+        // Deltas smaller than one chunk fit space a full-size chunk doesn't; Kwik's first-fit queue would send them
+        // first even with FIFO (addLast) requests.
+        val sizes = listOf(150_000, 150_000) + List(20) { 200 + it * 97 }
+        assertEquals(sizes.indices.toList(), deliveredFrameIDs(sizes))
+    }
+
+    @Test
+    fun reconnectRestartsFrameIDsWithAKeyframe() {
         val keyframeRequests = Semaphore(0)
-        val keyframe = byteArrayOf(0, 0, 0, 1, 0x40, 0x01, 0, 0, 0, 1, 0x26, 0x01)
-        lateinit var streamClient: FrameStreamClient
-        streamClient = makeClient(onKeyframeRequest = {
-            keyframeRequests.release()
-            // Like the encoder: answer each request with a keyframe.
-            streamClient.send(keyframe, isKeyframe = true)
-        })
+        val streamClient = makeClient(onKeyframeRequest = { keyframeRequests.release() })
         streamClient.start()
+        val keyframe = ByteArray(3_000) { it.toByte() }
+        val delta = byteArrayOf(0, 0, 0, 1, 0x02, 0x01, 0x55)
 
-        server.accept().use { socket ->
-            val hello = socket.readHello()
-            assertEquals("hello", hello["type"]?.jsonPrimitive?.content)
-            assertEquals(clientID.toString().uppercase(), hello["clientID"]?.jsonPrimitive?.content)
-            socket.reply("""{"ok":true}""")
+        val first = acceptStreaming(keyframeRequests)
+        streamClient.send(keyframe, isKeyframe = true)
+        streamClient.send(delta, isKeyframe = false)
+        InOrderReassembler(first.datagrams).run {
+            assertNext(frameID = 0, isKeyframe = true, data = keyframe)
+            assertNext(frameID = 1, isKeyframe = false, data = delta)
+        }
+        first.connection.close()
 
-            // Streaming starts with a keyframe request so the Mac gets parameter sets within its 2 s timeout.
-            assertTrue(keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
-            assertArrayEquals(keyframe, FramePacket.read(socket.getInputStream(), Int.MAX_VALUE))
-            runBlocking { withTimeout(5_000) { streamClient.status.first { it == StreamStatus.Streaming } } }
-
-            streamClient.send(byteArrayOf(0, 0, 0, 1, 0x02, 0x01), isKeyframe = false)
-            assertArrayEquals(byteArrayOf(0, 0, 0, 1, 0x02, 0x01), FramePacket.read(socket.getInputStream(), Int.MAX_VALUE))
-
-            socket.reply("\u0001")
-            assertTrue("[0x01] did not trigger a keyframe request", keyframeRequests.tryAcquire(5, TimeUnit.SECONDS))
-            assertArrayEquals(keyframe, FramePacket.read(socket.getInputStream(), Int.MAX_VALUE))
+        val second = acceptStreaming(keyframeRequests)
+        streamClient.send(delta, isKeyframe = false) // Dropped: the new connection starts with a keyframe.
+        streamClient.send(keyframe, isKeyframe = true)
+        streamClient.send(delta, isKeyframe = false)
+        InOrderReassembler(second.datagrams).run {
+            assertNext(frameID = 0, isKeyframe = true, data = keyframe)
+            assertNext(frameID = 1, isKeyframe = false, data = delta)
         }
     }
 
@@ -111,27 +185,26 @@ class FrameStreamClientTest {
             },
         ).start()
 
-        server.accept().use { socket ->
-            val hello = socket.readHello()
-            assertEquals("pair", hello["type"]?.jsonPrimitive?.content)
-            assertEquals("Test Phone", hello["name"]?.jsonPrimitive?.content)
-            socket.reply("""{"ok":true}""")
-            assertEquals(PairingHello.Kind.PAIR, accepted.poll(5, TimeUnit.SECONDS)?.kind)
-        }
-        // The server dropped the connection; the client reconnects with a plain hello.
-        server.accept().use { socket ->
-            assertEquals("hello", socket.readHello()["type"]?.jsonPrimitive?.content)
-        }
+        val first = receiver.accept()
+        val control = first.control()
+        val hello = control.readHello()
+        assertEquals("pair", hello["type"]?.jsonPrimitive?.content)
+        assertEquals("Test Phone", hello["name"]?.jsonPrimitive?.content)
+        control.reply("""{"ok":true}""")
+        assertEquals(PairingHello.Kind.PAIR, accepted.poll(5, TimeUnit.SECONDS)?.kind)
+        first.connection.close()
+
+        // The Mac dropped the connection; the client reconnects with a plain hello.
+        assertEquals("hello", receiver.accept().control().readHello()["type"]?.jsonPrimitive?.content)
     }
 
     @Test
     fun rejectionFailsWithoutRetrying() {
         val streamClient = makeClient()
         streamClient.start()
-        server.accept().use { socket ->
-            socket.readHello()
-            socket.reply("""{"ok":false,"reason":"Unknown client"}""")
-        }
+        val control = receiver.accept().control()
+        control.readHello()
+        control.reply("""{"ok":false,"reason":"Unknown client"}""")
         val status = runBlocking {
             withTimeout(5_000) { streamClient.status.first { it is StreamStatus.Failed } }
         }
@@ -141,44 +214,33 @@ class FrameStreamClientTest {
     @Test
     fun notAcceptingConnectionsIsRetried() {
         makeClient().start()
-        server.accept().use { socket ->
-            socket.readHello()
-            socket.reply("""{"ok":false,"reason":"Receiver is not accepting connections"}""")
-        }
+        val control = receiver.accept().control()
+        control.readHello()
+        control.reply("""{"ok":false,"reason":"Receiver is not accepting connections"}""")
         // Not a final failure: the client comes back with another hello.
-        server.accept().use { socket ->
-            assertEquals("hello", socket.readHello()["type"]?.jsonPrimitive?.content)
-        }
+        assertEquals("hello", receiver.accept().control().readHello()["type"]?.jsonPrimitive?.content)
     }
 
     @Test
-    fun certificateMismatchKeepsRetrying() {
+    fun certificateMismatchSendsNoHelloAndKeepsRetrying() {
         val streamClient = makeClient(fingerprint = TestIdentity().fingerprint)
         streamClient.start()
-        server.soTimeout = 5_000
-        runCatching { server.accept().use { (it as javax.net.ssl.SSLSocket).startHandshake() } }
         // Another Mac with the same name may answer while the paired one is offline: not a final failure.
         val status = runBlocking {
             withTimeout(5_000) { streamClient.status.first { it is StreamStatus.Retrying } }
         }
         assertTrue(status.toString(), (status as StreamStatus.Retrying).reason.contains("not the paired one"))
+        // The secret never reaches a Mac that failed the pin.
+        val peer = receiver.accept()
+        assertNull(peer.streams.poll(500, TimeUnit.MILLISECONDS))
     }
 
     @Test
-    fun skipsSameNamedReceiverWithAnotherCertificate() {
-        val impostor = TestIdentity().serverContext().serverSocketFactory
-            .createServerSocket(0, 1, InetAddress.getLoopbackAddress()) as SSLServerSocket
-        impostor.use {
-            val impostorThread = Thread {
-                runCatching { impostor.accept().use { (it as javax.net.ssl.SSLSocket).startHandshake() } }
-            }.apply { start() }
-            // The impostor holds the exact name; the paired Mac was renamed by Bonjour and comes second.
-            makeClient(candidates = { sequenceOf(serverAddress(impostor), serverAddress(server)) }).start()
-
-            server.accept().use { socket ->
-                assertEquals("hello", socket.readHello()["type"]?.jsonPrimitive?.content)
-            }
-            impostorThread.join(5_000)
+    fun skipsReceiverWithAnotherCertificate() {
+        QuicTestReceiver(TestIdentity()).use { impostor ->
+            makeClient(candidates = { sequenceOf(impostor.address, receiver.address) }).start()
+            assertEquals("hello", receiver.accept().control().readHello()["type"]?.jsonPrimitive?.content)
+            assertNull(impostor.accept().streams.poll(100, TimeUnit.MILLISECONDS))
         }
     }
 }

@@ -9,21 +9,20 @@ class PinnedTrustTest {
 
     @Test
     fun acceptsPinnedCertificate() {
-        PinnedTrust(mac.fingerprint).checkServerTrusted(arrayOf(mac.certificate), "ECDHE_ECDSA")
+        PinnedTrust(mac.fingerprint).check(listOf(mac.certificate))
     }
 
     @Test
     fun rejectsOtherCertificate() {
-        val other = TestIdentity()
         assertThrows(FingerprintMismatchException::class.java) {
-            PinnedTrust(mac.fingerprint).checkServerTrusted(arrayOf(other.certificate), "ECDHE_ECDSA")
+            PinnedTrust(mac.fingerprint).check(listOf(TestIdentity().certificate))
         }
     }
 
     @Test
-    fun rejectsEmptyChainAndClients() {
+    fun rejectsMissingCertificate() {
         val trust = PinnedTrust(mac.fingerprint)
-        assertThrows(CertificateException::class.java) { trust.checkServerTrusted(emptyArray(), "ECDHE_ECDSA") }
-        assertThrows(CertificateException::class.java) { trust.checkClientTrusted(arrayOf(mac.certificate), "ECDHE_ECDSA") }
+        assertThrows(CertificateException::class.java) { trust.check(emptyList()) }
+        assertThrows(CertificateException::class.java) { trust.check(null) }
     }
 }

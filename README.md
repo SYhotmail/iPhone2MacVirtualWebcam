@@ -218,12 +218,11 @@ If you change Transport networking code, rebuild both the iPhone app and the Mac
 
 ## Android Sender
 
-`android/` holds a native Android sender (Kotlin, Jetpack Compose, Android 10+). Android has no QUIC datagram API, so it streams over TLS 1.3 on TCP instead:
+`android/` holds a native Android sender (Kotlin, Jetpack Compose, Android 10+). It speaks the iPhone protocol: QUIC with datagrams through [Kwik](https://github.com/ptrd/kwik), a pure-Java QUIC library, since Android has no QUIC datagram API of its own.
 
-- Pairing uses the same QR code; the phone pins the Mac certificate's SHA-256 and sends the same `PairingHello`.
-- It finds the Mac through Bonjour `_cam2mac._tcp` (same service name as the QUIC listener), so the phone and the Mac must share a Wi-Fi network (no AWDL).
-- Video is HEVC from the hardware encoder (720x1280, 30 fps), sent as length-prefixed packets on the TLS stream. Phones without an HEVC encoder are not supported.
-- The Mac app needs its TLS/TCP listener for this to work end to end.
+- Pairing uses the same QR code and `PairingHello`. Kwik has no custom trust manager hook, so the app checks the Mac certificate's SHA-256 pin right after the QUIC handshake and sends nothing secret before it matches.
+- It finds the Mac through Bonjour `_cam2mac._udp` by the QR code's service name, so the phone and the Mac must share a Wi-Fi network (no AWDL).
+- Video is HEVC from the hardware encoder (720x1280, 30 fps), split into QUIC datagrams with the 10-byte `VideoDatagram` header, at most 1,200 bytes each. Phones without an HEVC encoder are not supported.
 
 Build and test with JDK 17 and the Android SDK (API 36):
 

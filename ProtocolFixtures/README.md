@@ -10,6 +10,7 @@ until both agree.
 | `pairing-reply.json` | same | same |
 | `pairing-invitation.json` | same | same |
 | `frame-packet.json` | same | same |
+| `video-datagram.json` | `Transport/Tests/TransportTests/ProtocolFixtureTests.swift` | `android/app/src/test/.../ProtocolFixtureTest.kt` |
 | `annexb-start-codes.json` | `H264/Tests/H264Tests/AnnexBFixtureTests.swift` | same |
 
 Byte strings are lowercase hex. JSON payloads are compared as parsed JSON, so key order and escaping
